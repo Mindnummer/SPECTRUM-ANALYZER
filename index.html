@@ -4,6 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=6.0, user-scalable=yes">
 <title>SPECTRUM · SIGNAL</title>
+<link rel="manifest" href="./manifest.webmanifest">
+<meta name="theme-color" content="#0a0f14">
+<link rel="apple-touch-icon" href="./icon-192.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Spectrum">
 <script>
 /* boot guard — shows ONLY real script crashes (ignores harmless resource/font load failures on file://) */
 (function(){function show(t){try{if(/ResizeObserver loop/i.test(String(t||'')))return; // benign browser layout notice — never a crash, never banner it
@@ -871,7 +878,7 @@ window.addEventListener('unhandledrejection',function(e){var r=e.reason;if(!r)re
 
 <script>
 "use strict";
-window.SPECTRUM_BUILD='2026-06-19·voices-viz';
+window.SPECTRUM_BUILD='2026-06-19·installable-app';
 /* =========================================================================
    SPECTRUM · SIGNAL  —  modular engines
    AppState · AudioEngine · MeasurementEngine · VisualizerEngine ·
@@ -993,7 +1000,9 @@ const Audio={
     if(this.micStream){const t=this.micStream.getAudioTracks()[0];if(t&&t.readyState==='live'){t.enabled=true;return this.micSource;}}
     if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){const e=new Error('insecure');e.name='InsecureContext';throw e;}
     const st=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:false,noiseSuppression:false,autoGainControl:false}});
-    this.micStream=st;this.micSource=a.createMediaStreamSource(st);return this.micSource;},
+    this.micStream=st;this.micSource=a.createMediaStreamSource(st);
+    try{const b=$('errbar');if(b)b.style.display='none';const sr=$('srStat');if(sr)sr.textContent='mic live';}catch(e){}
+    return this.micSource;},
   muteMic(){if(this.micStream){const t=this.micStream.getAudioTracks()[0];if(t)t.enabled=false;}},
   ping(freq){const a=this.ensure();if(a.state==='suspended')a.resume();if(!isFinite(freq)||freq<=0)return;freq=clamp(freq,20,Math.min(20000,this.nyquist()*0.98));
     const o=a.createOscillator(),g=a.createGain();o.type='sine';o.frequency.value=freq;
@@ -1448,7 +1457,7 @@ const UI={
     const denied=err&&(err.name==='NotAllowedError'||err.name==='SecurityError');
     let msg;
     if(opaque)msg='🎤 The mic needs the app opened from a web address. You loaded it as a local/downloaded file ('+location.protocol+'), which the browser treats as an origin it won’t grant mic access to — so the prompt never sticks. Fix: open it from https:// or http://localhost. Everything else (tones, noise, visuals, recording) works as-is.';
-    else if(denied)msg='🎤 Microphone permission was blocked. Tap the lock / site-settings icon by the address bar and allow Microphone, then press Play. In Brave, also tap the lion (Shields) icon and allow it.';
+    else if(denied)msg='🎤 Microphone permission is blocked. 1) Tap the lock / site-settings icon next to the web address and set Microphone to Allow, then reload. 2) If it still won’t start, your computer or phone may be blocking the browser itself — on Windows: Settings ▸ Privacy & security ▸ Microphone ▸ turn on access for your browser (and “desktop apps”). Then reload and press Play.';
     else msg='🎤 Could not open the microphone'+(err&&err.name?(' ('+err.name+')'):'')+'. Close other apps using it; the page must be on https:// or localhost.';
     const sr=$('srStat');if(sr)sr.textContent='mic unavailable on this page';
     const b=$('errbar');if(b){b.style.display='block';b.style.background='rgba(127,210,255,.12)';b.style.borderColor='rgba(127,210,255,.5)';b.style.color='#cfe8ff';b.textContent=msg;}
@@ -1547,8 +1556,8 @@ $('bRec').onclick=()=>Recorder.toggle();
 $('bFocus').onclick=()=>{const on=!Audio.focusOn;Audio.ensure();Audio.setFocus(on);$('bFocus').classList.toggle('on',on);$('bFocus').textContent=on?'🎧 Band: ON':'🎧 Hear band';Viz.fzUpdate();};
 $('bTrail').onclick=()=>{State.trails=!State.trails;$('bTrail').classList.toggle('on',State.trails);};
 $('bFull').onclick=()=>Fill.toggle();
-document.addEventListener('fullscreenchange',()=>setTimeout(()=>Viz.resize(),60));
-document.addEventListener('webkitfullscreenchange',()=>setTimeout(()=>Viz.resize(),60));
+document.addEventListener('fullscreenchange',()=>{try{Fill.syncFromFS();}catch(e){}setTimeout(()=>Viz.resize(),60);});
+document.addEventListener('webkitfullscreenchange',()=>{try{Fill.syncFromFS();}catch(e){}setTimeout(()=>Viz.resize(),60);});
 
 $('species').onchange=e=>{const[a,b]=e.target.value.split(',').map(Number);State.fmin=a;State.fmax=b;State.freq=clamp(State.freq,a,b);$('freq').value=posFromFreq(State.freq);Audio.setFreq();UI.freqV();};
 function setFreqValue(hz){hz=clamp(hz,State.fmin,State.fmax);if(!isFinite(hz))return;State.freq=hz;const pos=posFromFreq(hz);
@@ -1820,14 +1829,18 @@ const Reorder={
 };
 safe('reorder',()=>Reorder.init());
 /* ---------- Fill — reliable full-viewport stage (no Fullscreen API) + pull-up controls ---------- */
-const Fill={on:false,menu:false,exitBtn:null,menuBtn:null,
+const Fill={on:false,menu:false,exitBtn:null,menuBtn:null,_t:0,
   ensureBtns(){if(this.exitBtn)return;
     this.exitBtn=document.createElement('button');this.exitBtn.className='fillbtn';this.exitBtn.textContent='⤡ Exit full';this.exitBtn.style.left='12px';this.exitBtn.style.top='12px';this.exitBtn.onclick=()=>this.exit();
     this.menuBtn=document.createElement('button');this.menuBtn.className='fillbtn';this.menuBtn.textContent='≡ Controls';this.menuBtn.style.left='128px';this.menuBtn.style.top='12px';this.menuBtn.onclick=()=>this.toggleMenu();
     document.body.appendChild(this.exitBtn);document.body.appendChild(this.menuBtn);},
-  toggle(){this.on?this.exit():this.enter();},
-  enter(){this.on=true;this.ensureBtns();document.body.classList.add('stagefill');try{Viz.resize();}catch(e){}if(window.Core)window.Core.log('event','fill screen ON');},
-  exit(){this.on=false;this.menu=false;document.body.classList.remove('stagefill','fillmenu');if(this.menuBtn)this.menuBtn.textContent='≡ Controls';try{Viz.resize();}catch(e){}},
+  fsEl(){return document.fullscreenElement||document.webkitFullscreenElement||null;},
+  reqFS(){const el=document.documentElement,fn=el.requestFullscreen||el.webkitRequestFullscreen;if(fn)try{const p=fn.call(el);if(p&&p.catch)p.catch(()=>{});}catch(e){}},
+  exitFS(){try{if(this.fsEl()){if(document.exitFullscreen)document.exitFullscreen();else if(document.webkitExitFullscreen)document.webkitExitFullscreen();}}catch(e){}},
+  toggle(){const now=Date.now();if(now-this._t<500)return;this._t=now;this.on?this.exit():this.enter();},
+  enter(){this.on=true;this.ensureBtns();document.body.classList.add('stagefill');this.reqFS();try{Viz.resize();}catch(e){}if(window.Core)window.Core.log('event','fill screen ON');},
+  exit(){this.on=false;this.menu=false;document.body.classList.remove('stagefill','fillmenu');if(this.menuBtn)this.menuBtn.textContent='≡ Controls';this.exitFS();try{Viz.resize();}catch(e){}},
+  syncFromFS(){if(!this.fsEl()&&this.on){this.on=false;this.menu=false;document.body.classList.remove('stagefill','fillmenu');if(this.menuBtn)this.menuBtn.textContent='≡ Controls';try{Viz.resize();}catch(e){}}},
   toggleMenu(){this.menu=!this.menu;document.body.classList.toggle('fillmenu',this.menu);if(this.menuBtn)this.menuBtn.textContent=this.menu?'✕ Close controls':'≡ Controls';}};
 /* ---------- Profiles — named setups (theme + text + folds + hidden + skill) ---------- */
 const Profiles={
