@@ -513,6 +513,7 @@ window.addEventListener('unhandledrejection',function(e){var r=e.reason;if(!r)re
     <div class="sessionrow">
       <button class="btn" id="sessionQuiet" type="button">🌙 Quiet setup (10% max)</button>
       <button class="btn" id="sessionStop" type="button">■ Stop session</button>
+      <button class="btn" id="sessionResume" type="button" style="display:none">▶ Resume browser audio</button>
     </div>
     <div class="sessionnote" id="sessionHelp">The session clock starts when sound starts, is not reset by frequency edits, and ends with a smooth audio fade. Browsers/phones may pause audio when locked or in the background; test on the actual device. A digital limiter cannot measure safe sound pressure at your ears. Keep speaker/headphone volume low, especially during sleep.</div>
   </div>
@@ -987,6 +988,10 @@ const Session={
     custom.addEventListener('input',()=>this.configure(false));
     const stop=$('sessionStop');if(stop)stop.addEventListener('click',()=>this.stopNow());
     const quiet=$('sessionQuiet');if(quiet)quiet.addEventListener('click',()=>this.quiet());
+    const resume=$('sessionResume');if(resume)resume.addEventListener('click',async()=>{
+      try{if(Audio.ctx&&Audio.ctx.state==='suspended')await Audio.ctx.resume();}catch(e){}
+      this.draw();
+    });
     this.configure(false);
     this._tickTimer=setInterval(()=>this.tick(),1000);
     document.addEventListener('visibilitychange',()=>this.tick());
@@ -1010,9 +1015,23 @@ const Session={
       this.running=true;
       this.deadline=this.minutes?Date.now()+this.minutes*60000:0;
     }
+    // Media Session API can expose playback status on supported mobile lock screens.
+    // It does NOT guarantee uninterrupted background audio.
+    try{
+      if(navigator.mediaSession){
+        if(typeof MediaMetadata!=='undefined')navigator.mediaSession.metadata=new MediaMetadata({
+          title:'SPECTRUM · SIGNAL',artist:'Frequency generator'});
+        navigator.mediaSession.playbackState='playing';
+      }
+    }catch(e){}
     this.draw();
   },
-  ended(){if(!this.running)return;this.running=false;this.deadline=0;this.draw();},
+  ended(){
+    if(!this.running)return;
+    this.running=false;this.deadline=0;
+    try{if(navigator.mediaSession)navigator.mediaSession.playbackState='none';}catch(e){}
+    this.draw();
+  },
   stopNow(){
     try{if(typeof Mixer!=='undefined'&&Mixer.playing)Mixer.stop();}catch(e){}
     try{if(State.playing)Audio.stop();}catch(e){}
@@ -1034,7 +1053,10 @@ const Session={
   },
   draw(){
     const st=$('sessionStatus');if(!st)return;
-    if(!this.running)st.textContent=this.minutes?'Ready · '+this.minutes+' minute timer':'Ready · continuous until stopped';
+    const paused=this.running&&State.playing&&Audio.ctx&&Audio.ctx.state==='suspended';
+    const resume=$('sessionResume');if(resume)resume.style.display=paused?'':'none';
+    if(paused)st.textContent='⚠ Browser paused audio · tap Resume browser audio';
+    else if(!this.running)st.textContent=this.minutes?'Ready · '+this.minutes+' minute timer':'Ready · continuous until stopped';
     else if(!this.deadline)st.textContent='▶ Playing · continuous (manual stop)';
     else st.textContent='▶ Playing · '+this.format(this.deadline-Date.now())+' remaining';
   },
