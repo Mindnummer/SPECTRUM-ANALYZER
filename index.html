@@ -374,6 +374,19 @@ window.addEventListener('unhandledrejection',function(e){var r=e.reason;if(!r)re
 #sessionPanel .sessionstate{font-family:'Space Mono',monospace;color:var(--accent);font-size:14px;padding:7px 0}
 #sessionPanel .sessionnote{font-size:.72rem;color:var(--muted);line-height:1.5}
 .max-reflect{border:1px solid var(--accent);border-radius:7px;background:#10221b;color:var(--accent);min-width:57px;min-height:38px;font-weight:bold;cursor:pointer}
+
+/* Simple listening workflow: companion tones never bypass the master gain/limiter. */
+#sessionPanel .sessionrow input[type=number]{max-width:125px}
+#sessionPanel .harm-choices{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin:8px 0}
+#sessionPanel .harm-choices button{background:#10191d;color:var(--ink);border:1px solid var(--line);border-radius:9px;min-height:46px;padding:8px 2px;cursor:pointer;font:600 12px 'Space Mono',monospace;line-height:1.25}
+#sessionPanel .harm-choices button[aria-pressed="true"]{background:rgba(58,255,160,.12);border-color:var(--accent);color:var(--accent)}
+#sessionPanel .harm-choices button:focus-visible,#sessionPanel #sessionPlay:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+#sessionPanel .harm-label{font:600 11px 'Space Mono',monospace;color:var(--muted);letter-spacing:.04em;margin-top:7px}
+#sessionPanel .harm-feedback{font-size:.75rem;line-height:1.55;padding:8px 9px;border:1px solid var(--line);background:#0a1216;border-radius:8px;color:var(--ink)}
+#sessionPanel .harm-feedback strong{color:var(--accent)}
+#sessionPanel #sessionPlay{background:var(--accent);color:#07130c;border:none;border-radius:9px;min-height:48px;padding:11px 15px;font-weight:700;font-size:.9rem;cursor:pointer}
+#sessionPanel .sessionrow>label{font-size:.81rem}
+#sessionPanel .sessionstep{color:var(--accent);font-family:'Space Mono',monospace;font-weight:700}
 </style>
 </head>
 <body>
@@ -488,11 +501,31 @@ window.addEventListener('unhandledrejection',function(e){var r=e.reason;if(!r)re
 
   <!-- LONG LISTENING: manual tone shortcuts; medical effects are not asserted. -->
   <div class="panel" id="sessionPanel" aria-label="Listening session">
-    <div class="ptitle">🌙 Long listening &amp; frequency shortcuts</div>
-    <div class="sessionnote">One tap chooses a tone (it won't unexpectedly start sound). Presets are popular tuning/Solfeggio numbers, not medically proven healing treatments.</div>
+    <div class="ptitle">🌙 Easy listening · 3 simple steps</div>
+    <div class="sessionnote"><span class="sessionstep">1.</span> Pick a tone. <span class="sessionstep">2.</span> Optionally blend companions. <span class="sessionstep">3.</span> Set a duration and press Play. Frequencies below are popular tuning/Solfeggio numbers, not proven medical treatments.</div>
     <div id="quickToneButtons" class="freqquick" role="group" aria-label="Quick frequency presets"></div>
-    <div id="quickToneStatus" class="sessionnote" aria-live="polite" style="margin-top:7px">Choose a frequency, then press ▶ Play.</div>
-    <div class="ptitle" style="margin-top:15px">Listening duration</div>
+    <div class="sessionrow">
+      <label for="sessionExactFreq">Or enter exact Hz:</label>
+      <input id="sessionExactFreq" type="number" min="20" max="20000" step="any" value="440" inputmode="decimal" aria-label="Exact main frequency in hertz">
+      <button class="btn" id="sessionSetFreq" type="button">Set frequency</button>
+    </div>
+    <div id="quickToneStatus" class="sessionnote" aria-live="polite">Main tone: <strong id="sessionMainHz">440 Hz</strong> · press ▶ Play to listen.</div>
+    <div class="ptitle" style="margin-top:16px">② Add harmonics (optional) <span class="stat" id="harmCount">0 / 4</span></div>
+    <div class="sessionnote">Companion tones are mathematically linked to your main tone and follow it when you change Hz. Lower tones are <b>subharmonics</b> (÷); higher tones are harmonics (×). Select up to four total. No extra tones are added until you tap them.</div>
+    <div class="harm-label">LOWER · ÷2, ÷3, ÷4, ÷5</div>
+    <div id="harmLower" class="harm-choices" role="group" aria-label="Lower companion tones"></div>
+    <div class="harm-label">HIGHER · ×2, ×3, ×4, ×5</div>
+    <div id="harmUpper" class="harm-choices" role="group" aria-label="Higher harmonic tones"></div>
+    <div class="sessionrow">
+      <label for="harmBalance">Companion volume</label>
+      <select id="harmBalance" aria-label="Relative harmonic volume">
+        <option value="gentle" selected>Gentle · base louder</option>
+        <option value="balanced">Balanced</option>
+      </select>
+      <button class="btn" id="harmClear" type="button">Clear all harmonics</button>
+    </div>
+    <div id="harmSummary" class="harm-feedback" role="status" aria-live="polite">Pure tone only · no companions selected.</div>
+    <div class="ptitle" style="margin-top:16px">③ Listening duration</div>
     <div class="sessionrow">
       <label for="sessionDuration">Stop after</label>
       <select id="sessionDuration" aria-label="Listening duration">
@@ -512,10 +545,10 @@ window.addEventListener('unhandledrejection',function(e){var r=e.reason;if(!r)re
     <div class="sessionstate" id="sessionStatus" role="status" aria-live="polite">Ready · continuous playback</div>
     <div class="sessionrow">
       <button class="btn" id="sessionQuiet" type="button">🌙 Quiet setup (10% max)</button>
-      <button class="btn" id="sessionStop" type="button">■ Stop session</button>
+      <button id="sessionPlay" type="button">▶ Start listening</button>
       <button class="btn" id="sessionResume" type="button" style="display:none">▶ Resume browser audio</button>
     </div>
-    <div class="sessionnote" id="sessionHelp">The session clock starts when sound starts, is not reset by frequency edits, and ends with a smooth audio fade. Browsers/phones may pause audio when locked or in the background; test on the actual device. A digital limiter cannot measure safe sound pressure at your ears. Keep speaker/headphone volume low, especially during sleep.</div>
+    <div class="sessionnote" id="sessionHelp">Timer: changing tones or harmonics will not reset an active countdown. Device speakers and headphones differ; start at a low volume. A limiter prevents digital overload, not unsafe sound pressure at the ear. Overnight audio may pause when your phone locks—test on the actual device before relying on it.</div>
   </div>
   <!-- WATCHDOG -->
   <div class="panel wd" id="wdPanel">
@@ -1065,7 +1098,7 @@ const Session={
     State.pulse.rate=0;State.monitor=false;State.autoReduceHF=true;
     if(State.fade<0.4)State.fade=0.4;
     try{Audio.setMonitor(false);Audio.cfgTrem();Audio.setVolume();}catch(e){}
-    try{syncUI();Watchdog.apply();}catch(e){}
+    try{syncUI({restart:false});Watchdog.apply();}catch(e){}
     const t=$('quickToneStatus');if(t)t.textContent='Quiet setup applied: ≤10% app gain, no pulse, mic monitoring off. Check device volume too.';
   }
 };
@@ -1086,22 +1119,115 @@ const QuickTones={
   },
   mark(){
     document.querySelectorAll('#quickToneButtons button').forEach(b=>
-      b.classList.toggle('active',State.src==='tone'&&Number(b.dataset.hz)===Math.round(State.freq)));
+      b.classList.toggle('active',State.src==='tone'&&Math.abs(Number(b.dataset.hz)-State.freq)<0.001));
   },
   choose(hz){
     if(!Number.isFinite(hz)||hz<20||hz>20000)return;
     const wasBlend=typeof Mixer!=='undefined'&&Mixer.playing;
+    const wasSingle=State.playing,wasTone=wasSingle&&State.src==='tone';
     if(wasBlend)Mixer.stop();
     State.src='tone';State.fmin=20;State.fmax=20000;
     State.freq=hz;State.filterOn=false;
-    syncUI(); // existing single-tone session keeps running; if idle, do not surprise-play
-    if(wasBlend){
-      Audio.start().then(()=>{UI.syncPlay();this.mark();}).catch(e=>console.warn('preset start',e));
-    }
-    this.mark();
+    syncUI({restart:false}); // no oscillator restart and no countdown reset on tone change
+    if(wasBlend||(wasSingle&&!wasTone)){
+      Audio.start().then(()=>{UI.syncPlay();this.mark();Harmonics.render();}).catch(e=>console.warn('preset start',e));
+    }else if(wasTone)Audio.setFreq();
+    this.mark();Harmonics.render();
     const t=$('quickToneStatus');
     if(t)t.textContent=hz+' Hz selected'+(State.playing||wasBlend?' · playing':' · tap ▶ Play to listen')+'.';
     try{Watchdog.apply();}catch(e){}
+  }
+};
+
+
+/* ---------- Harmonics · up to four linked oscillators in the SAME audio safety bus ---------- */
+/* Lower ÷N tones are subharmonics, not harmonic overtones. No health claims. */
+const Harmonics={
+  ratios:[
+    {id:'l2',ratio:0.5,label:'÷2'},{id:'l3',ratio:1/3,label:'÷3'},
+    {id:'l4',ratio:0.25,label:'÷4'},{id:'l5',ratio:0.2,label:'÷5'},
+    {id:'u2',ratio:2,label:'×2'},{id:'u3',ratio:3,label:'×3'},
+    {id:'u4',ratio:4,label:'×4'},{id:'u5',ratio:5,label:'×5'}
+  ],
+  selected:new Set(), balance:'gentle', max:4,
+  init(){
+    try{
+      const raw=JSON.parse(localStorage.getItem('spectrum_harmonics')||'{}');
+      if(Array.isArray(raw.ids))this.selected=new Set(raw.ids.filter(k=>this.ratios.some(r=>r.id===k)).slice(0,this.max));
+      if(raw.balance==='balanced')this.balance='balanced';
+    }catch(e){}
+    for(const r of this.ratios){
+      const parent=$(r.id[0]==='l'?'harmLower':'harmUpper');
+      if(!parent)continue;
+      const b=document.createElement('button');b.type='button';b.dataset.harm=r.id;
+      b.textContent=r.label;
+      b.setAttribute('aria-pressed','false');
+      b.setAttribute('aria-label',(r.ratio<1?'Lower subharmonic ':'Higher harmonic ')+r.label);
+      b.addEventListener('click',()=>this.toggle(r.id));
+      parent.appendChild(b);
+    }
+    const clear=$('harmClear');if(clear)clear.addEventListener('click',()=>{
+      this.selected.clear();this.changed();
+    });
+    const balance=$('harmBalance');if(balance){
+      balance.value=this.balance;
+      balance.addEventListener('change',()=>{this.balance=balance.value==='balanced'?'balanced':'gentle';this.changed();});
+    }
+    const input=$('sessionExactFreq'),set=$('sessionSetFreq');
+    const submit=()=>{
+      const v=Number(input&&input.value);
+      if(!Number.isFinite(v)||v<20||v>20000){
+        const status=$('quickToneStatus');if(status)status.textContent='Please enter a frequency between 20 and 20,000 Hz.';
+        if(input)input.setAttribute('aria-invalid','true');
+        return;
+      }
+      if(input)input.removeAttribute('aria-invalid');
+      QuickTones.choose(v);
+    };
+    if(set)set.addEventListener('click',submit);
+    if(input)input.addEventListener('keydown',e=>{if(e.key==='Enter')submit();});
+    this.render();
+  },
+  persist(){try{localStorage.setItem('spectrum_harmonics',JSON.stringify({ids:[...this.selected],balance:this.balance}));}catch(e){}},
+  toggle(id){
+    if(!this.ratios.some(r=>r.id===id))return;
+    if(this.selected.has(id))this.selected.delete(id);
+    else if(this.selected.size<this.max)this.selected.add(id);
+    else{const t=$('harmSummary');if(t)t.textContent='Maximum four companion tones. Unselect one before adding another.';return;}
+    this.changed();
+  },
+  changed(){
+    this.persist();
+    if(typeof Audio!=='undefined'&&Audio.syncHarmonics)Audio.syncHarmonics();
+    this.render();
+    try{Watchdog.apply();}catch(e){}
+  },
+  playable(base=State.freq){
+    const ny=Audio.nyquist();
+    const safeMax=Math.min(20000,ny*0.94);
+    return this.ratios.filter(r=>this.selected.has(r.id)).map(r=>{
+      const hz=base*r.ratio;
+      return {...r,hz,usable:Number.isFinite(hz)&&hz>=20&&hz<=safeMax};
+    });
+  },
+  strength(){return this.balance==='balanced'?0.34:0.18;},
+  render(){
+    for(const b of document.querySelectorAll('#harmLower button,#harmUpper button')){
+      const on=this.selected.has(b.dataset.harm);
+      b.setAttribute('aria-pressed',String(on));
+    }
+    const count=$('harmCount');if(count)count.textContent=this.selected.size+' / '+this.max;
+    const main=$('sessionMainHz');if(main)main.textContent=State.freq.toLocaleString(undefined,{maximumFractionDigits:2})+' Hz';
+    const exact=$('sessionExactFreq');
+    if(exact&&document.activeElement!==exact)exact.value=String(State.freq);
+    const summary=$('harmSummary');
+    if(!summary)return;
+    if(!this.selected.size){summary.textContent='Pure tone only · no companion tones selected.';return;}
+    const rows=this.playable(),freqText=f=>f.toLocaleString(undefined,{maximumFractionDigits:2})+' Hz';
+    summary.textContent='Main '+freqText(State.freq)+' + '+rows.map(r=>
+      r.label+' '+freqText(r.hz)+(r.usable?'':' (unavailable on this device)')).join(' · ')
+      +'. '+rows.filter(r=>r.usable).length+' companion(s) audible if supported by your speakers.';
+    if(State.src!=='tone')summary.textContent+=' Switch Sound source to Tone to hear them.';
   }
 };
 
@@ -1128,6 +1254,7 @@ const Audio={
   ctx:null, analyser:null, freqF:null, freqB:null, timeF:null,
   outGain:null, limiter:null, monitorGain:null, trem:null, lfo:null, lfoDepth:null,
   src:null, filt:null, stream:null, autoTimer:null, recDest:null, micStream:null, micSource:null,
+  toneBus:null,baseToneGain:null,harmNodes:new Map(),
   ensure(){
     if(this.ctx)return this.ctx;
     const a=new (window.AudioContext||window.webkitAudioContext)();
@@ -1188,7 +1315,7 @@ const Audio={
     o.connect(g);g.connect(this.limiter);if(this.recDest)g.connect(this.recDest);o.start();o.stop(a.currentTime+0.5);},
   async start(){const a=this.ensure();if(a.state==='suspended')await a.resume();State.lastEngine='single';this.stopSource();
     let src;
-    if(State.src==='tone'){src=a.createOscillator();src.type='sine';src.frequency.value=State.freq;src.start();}
+    if(State.src==='tone'){src=a.createOscillator();src.type='sine';src.frequency.value=Math.min(State.freq,this.nyquist()*0.94);src.start();}
     else if(State.src==='mic'){
       try{src=await this.getMic();}
       catch(err){UI.micError(err);return;}
@@ -1200,13 +1327,19 @@ const Audio={
       src.connect(this.recDest);             // record the mic itself
     } else {
       let node=src;
-      if(State.filterOn){this.filt.disconnect();this.filt.frequency.value=State.freq;src.connect(this.filt);node=this.filt;} 
+      if(State.src==='tone'){
+        this.toneBus=a.createGain();this.toneBus.gain.value=1;
+        this.baseToneGain=a.createGain();this.baseToneGain.gain.value=1;
+        src.connect(this.baseToneGain);this.baseToneGain.connect(this.toneBus);
+        node=this.toneBus;
+      }
+      if(State.filterOn){this.filt.disconnect();this.filt.frequency.value=State.freq;node.connect(this.filt);node=this.filt;}
       node.connect(this.analyser);           // tap for visuals/measure
       node.connect(this.recDest);            // record what's analysed
       node.connect(this.trem);               // output bus -> limiter
     }
     State.playing=true;
-    Session.start();
+    Session.start();this.syncHarmonics();
     this.outGain.gain.setTargetAtTime(State.src==='mic'?0.0001:this.effGain(),a.currentTime,Math.max(0.004,State.fade/3));
     this.setMonitor(State.monitor);
     this.armAutoStop();
@@ -1216,13 +1349,44 @@ const Audio={
     clearTimeout(this.autoTimer);
     Session.ended();
     setTimeout(()=>{if(!State.playing)this.stopSource();},Math.max(40,State.fade*1000));},
-  stopSource(){if(this.src){try{this.src.disconnect();}catch(e){}if(this.src.stop)try{this.src.stop();}catch(e){}this.src.onaudioprocess=null;this.src=null;}
+  stopSource(){
+    for(const obj of this.harmNodes.values()){try{obj.o.stop();}catch(e){}try{obj.o.disconnect();obj.g.disconnect();}catch(e){}}
+    this.harmNodes.clear();
+    if(this.baseToneGain){try{this.baseToneGain.disconnect();}catch(e){}this.baseToneGain=null;}
+    if(this.toneBus){try{this.toneBus.disconnect();}catch(e){}this.toneBus=null;}
+    if(this.src){try{this.src.disconnect();}catch(e){}if(this.src.stop)try{this.src.stop();}catch(e){}this.src.onaudioprocess=null;this.src=null;}
     if(this.stream){this.stream.getTracks().forEach(t=>t.stop());this.stream=null;}this.muteMic();},
   setVolume(){if(this.ctx&&State.playing&&State.src!=='mic')this.outGain.gain.setTargetAtTime(this.effGain(),this.ctx.currentTime,0.03);},
   setMonitor(on){State.monitor=on;if(this.ctx&&State.src==='mic')this.monitorGain.gain.setTargetAtTime(on&&State.playing?State.volume*0.5:0.0001,this.ctx.currentTime,0.05);},
-  setFreq(){if(this.filt)this.filt.frequency.setTargetAtTime(State.freq,this.ctx?this.ctx.currentTime:0,0.02);
-    if(State.src==='tone'&&this.src&&this.src.frequency)this.src.frequency.setTargetAtTime(State.freq,this.ctx.currentTime,0.02);
-    this.setVolume();this.armAutoStop();},
+  setFreq(){if(this.filt&&this.ctx)this.filt.frequency.setTargetAtTime(Math.min(State.freq,this.nyquist()*0.94),this.ctx.currentTime,0.02);
+    if(State.src==='tone'&&this.src&&this.src.frequency)this.src.frequency.setTargetAtTime(Math.min(State.freq,this.nyquist()*0.94),this.ctx.currentTime,0.02);
+    this.syncHarmonics();this.setVolume();this.armAutoStop();
+    try{Harmonics.render();}catch(e){}
+  },
+  syncHarmonics(){
+    if(!this.ctx||!this.toneBus||!this.baseToneGain||State.src!=='tone'||!State.playing)return;
+    const a=this.ctx,t=a.currentTime,desired=Harmonics.playable().filter(r=>r.usable);
+    const keys=new Set(desired.map(r=>r.id));
+    for(const [id,obj] of this.harmNodes){
+      if(!keys.has(id)){
+        this.harmNodes.delete(id);
+        try{obj.g.gain.setTargetAtTime(0,t,0.018);}catch(e){}
+        setTimeout(()=>{try{obj.o.stop();obj.o.disconnect();obj.g.disconnect();}catch(e){}},160);
+      }
+    }
+    const n=desired.length,part=Harmonics.strength(),norm=1/(1+n*part);
+    this.baseToneGain.gain.setTargetAtTime(norm,t,0.025);
+    for(const r of desired){
+      let obj=this.harmNodes.get(r.id);
+      if(!obj){
+        const o=a.createOscillator(),g=a.createGain();o.type='sine';o.frequency.value=r.hz;
+        g.gain.value=0;o.connect(g);g.connect(this.toneBus);o.start();
+        obj={o,g};this.harmNodes.set(r.id,obj);
+      }
+      obj.o.frequency.setTargetAtTime(r.hz,t,0.025);
+      obj.g.gain.setTargetAtTime(norm*part,t,0.025);
+    }
+  },
   armAutoStop(){ // Legacy 600-second cutoff retired; Session owns the countdown for all sound sources.
     clearTimeout(this.autoTimer);this.autoTimer=null;
   },
@@ -1333,12 +1497,17 @@ const Watchdog={
   },
   assess(){
     const fixed=this.sanitize(), nyq=Audio.nyquist(), tone=State.src==='tone'||State.sweeping;
+    const harmonicRows=State.src==='tone'?Harmonics.playable():[];
+    const activeHigh=Math.max(State.freq,...harmonicRows.filter(r=>r.usable).map(r=>r.hz));
     let score=0, mult=1, outputMode='audio', warnings=[], prot=['limiter','gain-clamp','invalid-math-guard','export-preflight'];
     if(fixed.length){score+=55;warnings.push('Invalid value clamped: '+fixed.join(', ')+'.');}
     // frequency safety
     if(tone&&State.freq>nyq){outputMode='visual-only';mult=0;score+=35;warnings.push('Above Nyquist ('+Physics.hz(nyq)+') — the device can\u2019t emit this. Output muted; visual only.');prot.push('visual-only-lockout');}
     else if(tone&&State.freq>15000){score+=28;warnings.push('Very high frequency ('+Physics.hz(State.freq)+') — likely beyond reliable speaker output.');}
     else if(tone&&State.freq>8000){score+=12;}
+    if(harmonicRows.some(r=>!r.usable)){score+=8;warnings.push('Some companion frequencies are outside audible/device range and have been muted.');prot.push('harmonic-limit-guard');}
+    if(tone&&activeHigh>8000&&State.volume>0.5){score+=12;warnings.push('A companion tone exceeds 8 kHz; keep volume low.');}
+    if(harmonicRows.length){prot.push('normalized-harmonic-mix');}
     // volume
     if(State.volume>0.8)score+=14; else if(State.volume>0.6)score+=7;
     // filter / Q resonance
@@ -1362,7 +1531,8 @@ const Watchdog={
   },
   apply(){
     const r=this.assess();
-    document.body.className=r.level;
+    document.body.classList.remove('safe','caution','warning','danger');
+    document.body.classList.add(r.level);
     $('wdScore').textContent=r.score;
     $('wdState').textContent=r.level.toUpperCase();
     $('wdOut').textContent={audio:'AUDIO','visual-only':'VISUAL ONLY','mic-visual-only':'MIC VISUAL ONLY','protected-audio':'PROTECTED AUDIO'}[r.outputMode];
@@ -1647,6 +1817,7 @@ const UI={
   syncPlay(){const blend=(typeof Mixer!=='undefined'&&Mixer.playing),playing=State.playing||blend;
     const idleLabel=(typeof State!=='undefined'&&State.lastEngine==='blend'&&typeof Mixer!=='undefined'&&Mixer.layers&&Mixer.layers.length)?'▶ Play blend':'▶ Play';
     const stopLabel=blend?'⏸ Stop blend':'⏸ Stop',t=playing?stopLabel:idleLabel;
+    const sessionButton=$('sessionPlay');if(sessionButton)sessionButton.textContent=playing?'■ Stop listening':'▶ Start listening';
     const a=$('bPlay');if(a)a.textContent=t;const b=$('bPlayTop');if(b){b.textContent=t;b.classList.toggle('on',playing);}
     const d=$('dockPlay');if(d){d.textContent=playing?'⏸':'▶';d.classList.toggle('on',playing);}
     const mp=$('mixPlay');if(mp){mp.textContent=blend?'⏸ Pause':'▶ Play';mp.classList.toggle('on',blend);}
@@ -1662,7 +1833,7 @@ const UI={
     if((State.src!=='mic'&&State.freq>20000)||State.freq>nyq)html+='<span class="badge b-hw">HARDWARE-LIMITED</span>';
     if(html!==this._bcache){this._bcache=html;$('badges').innerHTML=html;}
   },
-  freqV(){$('freqV').textContent=Physics.hz(State.freq);
+  freqV(){$('freqV').textContent=Physics.hz(State.freq);Harmonics.render();
     const dn=$('dockFreqNum');if(dn&&document.activeElement!==dn)dn.value=Math.round(State.freq);
     const f=Physics.family(State.freq);
     $('fNote').textContent=f.note;$('fPer').textContent=f.period;$('fOct').textContent=f.oct;
@@ -1732,6 +1903,7 @@ async function togglePlay(){
   else if(typeof Mixer!=='undefined'&&State.lastEngine==='blend'&&Mixer.layers.length){Mixer.start();}
   else{Viz.vfadeStart=performance.now();await Audio.start();}
   UI.syncPlay();Watchdog.apply();}
+$('sessionPlay').onclick=togglePlay;
 $('bPlay').onclick=togglePlay;
 $('bPlayTop').onclick=togglePlay;
 $('bRec').onclick=()=>Recorder.toggle();
@@ -1744,7 +1916,7 @@ document.addEventListener('webkitfullscreenchange',()=>{try{Fill.syncFromFS();}c
 $('species').onchange=e=>{const[a,b]=e.target.value.split(',').map(Number);State.fmin=a;State.fmax=b;State.freq=clamp(State.freq,a,b);$('freq').value=posFromFreq(State.freq);Audio.setFreq();UI.freqV();};
 function setFreqValue(hz){hz=clamp(hz,State.fmin,State.fmax);if(!isFinite(hz))return;State.freq=hz;const pos=posFromFreq(hz);
   const f=$('freq');if(f)f.value=pos;const df=$('dockFreq');if(df)df.value=pos;
-  Audio.setFreq();UI.freqV();Watchdog.apply();}
+  Audio.setFreq();UI.freqV();Watchdog.apply();Harmonics.render();}
 function setSpeed(pos){const p=clamp(+pos||0,0,1000);State.pulse.rate=p<=0?0:0.1*Math.pow(400,p/1000);
   const lbl=State.pulse.rate<=0?'steady':(State.pulse.rate<1?State.pulse.rate.toFixed(2):State.pulse.rate.toFixed(1))+' Hz';
   const pe=$('pulse');if(pe)pe.value=p;const pv=$('pulseV');if(pv)pv.textContent=lbl;
@@ -1768,6 +1940,7 @@ sw('swHF','autoReduceHF',()=>{Audio.setVolume();UI.freqV();});
 // Long session is now controlled by the visible listening duration selector.
 Session.init();
 QuickTones.init();
+Harmonics.init();
 
 $('expDur').onchange=e=>{$('expCustWrap').style.display=e.target.value==='custom'?'block':'none';};
 $('expCust').oninput=e=>{$('expCustV').textContent=e.target.value+' s';};
@@ -1911,9 +2084,9 @@ const Presets={
 };
 
 /* ---------- sync all UI controls from State ---------- */
-function syncUI(){
+function syncUI(options){
   const sval=State.fmin+','+State.fmax;for(const o of $('species').options)if(o.value===sval)o.selected=true;
-  $('freq').value=posFromFreq(clamp(State.freq,State.fmin,State.fmax));QuickTones.mark();
+  $('freq').value=posFromFreq(clamp(State.freq,State.fmin,State.fmax));QuickTones.mark();Harmonics.render();
   $('vol').value=Math.round(State.volume*100);$('volV').textContent=Math.round(State.volume*100)+'%';
   if(State.filterOn){$('filt').value=clamp((State.Q-0.5)/18*100,1,100);$('filtV').textContent='Q '+State.Q.toFixed(1);}else{$('filt').value=0;$('filtV').textContent='off';}
   const pr=State.pulse.rate;$('pulse').value=pr<=0?0:clamp(Math.log(pr/0.1)/Math.log(400)*1000,0,1000);$('pulseV').textContent=pr<=0?'steady':(pr<1?pr.toFixed(2):pr.toFixed(1))+' Hz';
@@ -1926,7 +2099,7 @@ function syncUI(){
   document.querySelectorAll('#swType button').forEach(b=>b.classList.toggle('on',b.dataset.t===Sweep.type));
   $('swF0').value=posSweep(Sweep.f0);$('swF1').value=posSweep(Sweep.f1);$('swDur').value=Sweep.dur;
   $('swF0V').textContent=Physics.hz(Sweep.f0);$('swF1V').textContent=Physics.hz(Sweep.f1);$('swDurV').textContent=Sweep.dur+' s';
-  Audio.cfgTrem();UI.freqV();Watchdog.apply();if(State.playing)Audio.start();
+  Audio.cfgTrem();UI.freqV();Watchdog.apply();if(State.playing&&!(options&&options.restart===false))Audio.start();
 }
 
 /* ---------- Phase 3 wiring ---------- */
