@@ -967,7 +967,7 @@ addEventListener('error',e=>{try{if(e.message&&/ResizeObserver loop/i.test(e.mes
 function safe(label,fn){try{fn();if(typeof Diag!=='undefined')Diag.mark(label);}catch(e){console.warn('init:'+label,e);try{const b=$('errbar');if(b){b.style.display='block';b.textContent='⚠ '+label+': '+((e&&e.message)||e);}}catch(_){}}}
 const Diag={
   done:Object.create(null),
-  EXPECT:['resize','freqV','syncPlay','hardware','watchdog','sweep','calibration','preset','syncUI','settings','display','dock','fz','selftest','mixer','loop'],
+  EXPECT:['resize','freqV','syncPlay','hardware','watchdog','sweep','calibration','preset','syncUI','settings','display','dock','fz','selftest','mixer','harmonics','loop'],
   checks:[
     ['Render loop running', ()=>typeof Viz!=='undefined'&&!!Viz.raf],
     ['Audio engine', ()=>typeof Audio!=='undefined'&&!!Audio.ensure],
@@ -976,7 +976,8 @@ const Diag={
     ['Frequency-zoom wired', ()=>typeof Viz!=='undefined'&&!!Viz._fzReady],
     ['Band-focus audio path', ()=>typeof Audio!=='undefined'&&!!Audio.setFocus],
     ['Transport dock', ()=>!!document.getElementById('dock')],
-    ['Blend mixer', ()=>typeof Mixer!=='undefined'&&!!Mixer.add&&!!document.getElementById('mixer')]
+    ['Blend mixer', ()=>typeof Mixer!=='undefined'&&!!Mixer.add&&!!document.getElementById('mixer')],
+    ['Harmonic tone engine',()=>typeof Harmonics!=='undefined'&&!!Harmonics.playable&&!!document.getElementById('harmUpper')&&!!Audio.syncHarmonics]
   ],
   mark(n){this.done[n]=true;},
   run(){
@@ -1720,7 +1721,14 @@ const Export={
     const sr=44100,N=Math.floor(sr*seconds),nyq=sr/2;
     if(State.src==='tone'&&State.freq>nyq){alert('That tone ('+Physics.hz(State.freq)+') is above this file\u2019s Nyquist limit ('+Physics.hz(nyq)+'). It can\u2019t be represented — export blocked.');return;}
     let buf=new Float32Array(N);
-    if(State.src==='tone'){for(let i=0;i<N;i++)buf[i]=Math.sin(2*Math.PI*State.freq*i/sr)*0.5;}
+    if(State.src==='tone'){
+      // Export the same linked harmonic mix that the listener hears (rather than base tone only).
+      // Below/above export device representable frequencies are skipped without aliasing.
+      const companions=Harmonics.playable(State.freq).filter(r=>r.usable&&r.hz<nyq*0.94);
+      const part=Harmonics.strength(),norm=1/(1+companions.length*part);
+      const series=[{hz:State.freq,amp:norm},...companions.map(r=>({hz:r.hz,amp:norm*part}))];
+      for(let i=0;i<N;i++){let v=0;const t=i/sr;for(const c of series)v+=Math.sin(2*Math.PI*c.hz*t)*c.amp;buf[i]=v*0.5;}
+    }
     else{let b0=0,b1=0,b2=0,b3=0,b4=0,b5=0,b6=0,last=0;for(let i=0;i<N;i++){const w=Math.random()*2-1;
       if(State.src==='white'||State.src==='mic')buf[i]=w*0.5;
       else if(State.src==='pink'){b0=0.99886*b0+w*0.0555179;b1=0.99332*b1+w*0.0750759;b2=0.96900*b2+w*0.1538520;b3=0.86650*b3+w*0.3104856;b4=0.55000*b4+w*0.5329522;b5=-0.7616*b5-w*0.0168980;buf[i]=(b0+b1+b2+b3+b4+b5+b6+w*0.5362)*0.11;b6=w*0.115926;}
@@ -1736,7 +1744,7 @@ const Export={
     const ab=new ArrayBuffer(44+N*2),dv=new DataView(ab),ws=(o,s)=>{for(let i=0;i<s.length;i++)dv.setUint8(o+i,s.charCodeAt(i));};
     ws(0,'RIFF');dv.setUint32(4,36+N*2,true);ws(8,'WAVE');ws(12,'fmt ');dv.setUint32(16,16,true);dv.setUint16(20,1,true);dv.setUint16(22,1,true);dv.setUint32(24,sr,true);dv.setUint32(28,sr*2,true);dv.setUint16(32,2,true);dv.setUint16(34,16,true);ws(36,'data');dv.setUint32(40,N*2,true);
     let o=44;for(let i=0;i<N;i++){let s=clamp(buf[i],-1,1);dv.setInt16(o,s*32767,true);o+=2;}
-    const name='SIGNAL_'+State.src+(State.src==='tone'?'_'+Math.round(State.freq)+'Hz':'')+(State.filterOn&&State.src!=='tone'?'_bp'+Math.round(State.freq):'')+'_'+seconds+'s.wav';
+    const name='SIGNAL_'+State.src+(State.src==='tone'?'_'+Math.round(State.freq)+'Hz'+(Harmonics.selected.size?'_harm'+Harmonics.selected.size:''):'')+(State.filterOn&&State.src!=='tone'?'_bp'+Math.round(State.freq):'')+'_'+seconds+'s.wav';
     const blob=new Blob([ab],{type:'audio/wav'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;a.click();URL.revokeObjectURL(url);
   },
   encode(buf,sr,name){const N=buf.length;let peak=0;for(let i=0;i<N;i++){const v=Math.abs(buf[i]);if(v>peak)peak=v;}if(peak>0.99){const s=0.95/peak;for(let i=0;i<N;i++)buf[i]*=s;}
@@ -1940,7 +1948,7 @@ sw('swHF','autoReduceHF',()=>{Audio.setVolume();UI.freqV();});
 // Long session is now controlled by the visible listening duration selector.
 Session.init();
 QuickTones.init();
-Harmonics.init();
+safe('harmonics',()=>Harmonics.init());
 
 $('expDur').onchange=e=>{$('expCustWrap').style.display=e.target.value==='custom'?'block':'none';};
 $('expCust').oninput=e=>{$('expCustV').textContent=e.target.value+' s';};
@@ -2044,7 +2052,7 @@ const Calibration={
 
 /* ---------- PresetEngine (Phase 3) ---------- */
 const Presets={
-  gather(){return{freq:Math.round(State.freq),type:State.src,viz:State.viz,fmin:State.fmin,fmax:State.fmax,filterOn:State.filterOn,Q:+State.Q.toFixed(2),volume:+State.volume.toFixed(2),pulseRate:+State.pulse.rate.toFixed(2),pulseDepth:State.pulse.depth,pulseShape:State.pulse.shape,fade:State.fade,trails:State.trails,monitor:State.monitor,autoReduceHF:State.autoReduceHF,sweep:{type:Sweep.type,f0:Sweep.f0,f1:Sweep.f1,dur:Sweep.dur},light:(window.Light&&Light.getState)?Light.getState():null,mixer:(typeof Mixer!=='undefined'&&Mixer.gather)?Mixer.gather():null,fall:Object.assign({},Viz.fallCfg),calibrated:!!State.calibrated};},
+  gather(){return{freq:Math.round(State.freq),type:State.src,viz:State.viz,fmin:State.fmin,fmax:State.fmax,filterOn:State.filterOn,Q:+State.Q.toFixed(2),volume:+State.volume.toFixed(2),pulseRate:+State.pulse.rate.toFixed(2),pulseDepth:State.pulse.depth,pulseShape:State.pulse.shape,fade:State.fade,trails:State.trails,monitor:State.monitor,autoReduceHF:State.autoReduceHF,harmonics:{ids:[...Harmonics.selected],balance:Harmonics.balance},sweep:{type:Sweep.type,f0:Sweep.f0,f1:Sweep.f1,dur:Sweep.dur},light:(window.Light&&Light.getState)?Light.getState():null,mixer:(typeof Mixer!=='undefined'&&Mixer.gather)?Mixer.gather():null,fall:Object.assign({},Viz.fallCfg),calibrated:!!State.calibrated};},
   apply(p){if(!p)return;
     if(isFinite(p.fmin)&&isFinite(p.fmax)){State.fmin=p.fmin;State.fmax=p.fmax;}
     if(isFinite(p.freq))State.freq=clamp(p.freq,State.fmin,State.fmax);
@@ -2055,6 +2063,12 @@ const Presets={
     if(isFinite(p.fade))State.fade=p.fade;
     if(p.sweep){if(p.sweep.type)Sweep.type=p.sweep.type;if(isFinite(p.sweep.f0))Sweep.f0=p.sweep.f0;if(isFinite(p.sweep.f1))Sweep.f1=p.sweep.f1;if(isFinite(p.sweep.dur))Sweep.dur=p.sweep.dur;}
     if(typeof p.trails==='boolean'){State.trails=p.trails;const t=$('bTrail');if(t)t.classList.toggle('on',State.trails);}
+    if(p.harmonics&&Array.isArray(p.harmonics.ids)){
+      Harmonics.selected=new Set(p.harmonics.ids.filter(id=>Harmonics.ratios.some(r=>r.id===id)).slice(0,Harmonics.max));
+      Harmonics.balance=p.harmonics.balance==='balanced'?'balanced':'gentle';
+      const balance=$('harmBalance');if(balance)balance.value=Harmonics.balance;
+      Harmonics.persist();Harmonics.render();if(Audio.syncHarmonics)Audio.syncHarmonics();
+    }
     if(typeof p.monitor==='boolean'){State.monitor=p.monitor;const m=$('swMonitor');if(m)m.classList.toggle('on',State.monitor);}
     if(typeof p.autoReduceHF==='boolean'){State.autoReduceHF=p.autoReduceHF;const m=$('swHF');if(m)m.classList.toggle('on',State.autoReduceHF);}
     // Legacy timer fields from older presets are intentionally ignored.
@@ -2989,13 +3003,13 @@ setInterval(()=>{try{Presets.autosave();}catch(e){}},5000);
 setTimeout(()=>{try{Diag.run();}catch(e){}},500);
 /* ---------- Experience Mode (progressive disclosure / skill levels) ---------- */
 const Mode={
-  cur:'expert',
+  cur:'beginner',
   tag(starts,cls){var ps=document.querySelectorAll('.panel');for(var i=0;i<ps.length;i++){var t=ps[i].querySelector('.ptitle');if(!t)continue;var s=t.textContent.trim();for(var j=0;j<starts.length;j++){if(s.indexOf(starts[j])===0){ps[i].classList.add(cls);break;}}}},
   set(m){this.cur=m;var b=document.body;b.classList.remove('exp-beginner','exp-tech','exp-expert');b.classList.add('exp-'+m);
     var seg=document.getElementById('expSeg');if(seg){var bs=seg.querySelectorAll('button');for(var i=0;i<bs.length;i++)bs[i].classList.toggle('on',bs[i].getAttribute('data-exp')===m);}
     try{localStorage.setItem('spectrum-exp',m);}catch(e){}if(window.Core)window.Core.log('event','skill level → '+m);},
   init(){this.tag(['Signal Detective','Sweep','Export','Frequency Family'],'lvl-tech');this.tag(['Calibration','Hardware Bridge','Presets'],'lvl-adv');
-    var saved='expert';try{saved=localStorage.getItem('spectrum-exp')||'expert';}catch(e){}this.set(saved);
+    var saved='beginner';try{saved=localStorage.getItem('spectrum-exp')||'beginner';}catch(e){}this.set(saved);
     var seg=document.getElementById('expSeg');if(seg)seg.addEventListener('click',function(e){var t=e.target;while(t&&t!==seg&&!t.getAttribute('data-exp'))t=t.parentNode;if(t&&t.getAttribute&&t.getAttribute('data-exp'))Mode.set(t.getAttribute('data-exp'));});}
 };
 safe('theme',()=>Theme.init());safe('mode',()=>Mode.init());safe('profiles',()=>Profiles.init());
