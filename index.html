@@ -387,6 +387,11 @@ window.addEventListener('unhandledrejection',function(e){var r=e.reason;if(!r)re
 #sessionPanel #sessionPlay{background:var(--accent);color:#07130c;border:none;border-radius:9px;min-height:48px;padding:11px 15px;font-weight:700;font-size:.9rem;cursor:pointer}
 #sessionPanel .sessionrow>label{font-size:.81rem}
 #sessionPanel .sessionstep{color:var(--accent);font-family:'Space Mono',monospace;font-weight:700}
+
+/* Beginner sees five clear visualization choices, with all others one tap away. */
+body.exp-beginner:not(.viz-expanded) #vizChips .viz-advanced{display:none!important}
+body.exp-tech #vizReveal,body.exp-expert #vizReveal{display:none!important}
+#vizReveal:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 </style>
 </head>
 <body>
@@ -595,24 +600,25 @@ window.addEventListener('unhandledrejection',function(e){var r=e.reason;if(!r)re
   <div class="chips" id="vizChips" style="margin-top:11px">
     <div class="chip on" data-v="wave">Waveform</div>
     <div class="chip" data-v="spec">Spectrum</div>
-    <div class="chip" data-v="voices">🎚 Voices — see each sound</div>
-    <div class="chip" data-v="fall">Waterfall</div>
-    <div class="chip" data-v="s3d">Spectra-3D</div>
-    <div class="chip" data-v="bars">Bars</div>
+    <div class="chip viz-advanced" data-v="voices">🎚 Voices — see each sound</div>
+    <div class="chip viz-advanced" data-v="fall">Waterfall</div>
+    <div class="chip viz-advanced" data-v="s3d">Spectra-3D</div>
+    <div class="chip viz-advanced" data-v="bars">Bars</div>
     <div class="chip" data-v="radial">Radial</div>
-    <div class="chip" data-v="phasor">Phasor</div>
-    <div class="chip" data-v="liss">Lissajous</div>
+    <div class="chip viz-advanced" data-v="phasor">Phasor</div>
+    <div class="chip viz-advanced" data-v="liss">Lissajous</div>
     <div class="chip" data-v="chladni">Chladni</div>
     <div class="chip" data-v="cymatic">Cymatic</div>
-    <div class="chip" data-v="color">🌈 Color (sound as light)</div>
-    <div class="chip" data-v="verify">✓ Verify</div>
-    <div class="chip" data-v="blend">⌥ Blend wave</div>
-    <div class="chip" data-v="twin">Twin bars</div>
-    <div class="chip" data-v="constel">Constellation</div>
-    <div class="chip" data-v="spiral">Pitch spiral</div>
-    <div class="chip" data-v="scope">Vectorscope</div>
-    <div class="chip" data-v="mirror">Kaleidoscope</div>
+    <div class="chip viz-advanced" data-v="color">🌈 Color (sound as light)</div>
+    <div class="chip viz-advanced" data-v="verify">✓ Verify</div>
+    <div class="chip viz-advanced" data-v="blend">⌥ Blend wave</div>
+    <div class="chip viz-advanced" data-v="twin">Twin bars</div>
+    <div class="chip viz-advanced" data-v="constel">Constellation</div>
+    <div class="chip viz-advanced" data-v="spiral">Pitch spiral</div>
+    <div class="chip viz-advanced" data-v="scope">Vectorscope</div>
+    <div class="chip viz-advanced" data-v="mirror">Kaleidoscope</div>
   </div>
+  <button class="btn" id="vizReveal" type="button" aria-expanded="false" style="margin-top:7px;min-height:42px;width:100%;text-align:center">Explore 14 more visualizers</button>
 
   <div class="panel" id="fallPanel" style="display:none;margin-top:11px">
     <div class="ptitle">Waterfall display</div>
@@ -1203,8 +1209,7 @@ const Harmonics={
     this.render();
     try{Watchdog.apply();}catch(e){}
   },
-  playable(base=State.freq){
-    const ny=Audio.nyquist();
+  playable(base=State.freq,ny=Audio.nyquist()){
     const safeMax=Math.min(20000,ny*0.94);
     return this.ratios.filter(r=>this.selected.has(r.id)).map(r=>{
       const hz=base*r.ratio;
@@ -1724,7 +1729,7 @@ const Export={
     if(State.src==='tone'){
       // Export the same linked harmonic mix that the listener hears (rather than base tone only).
       // Below/above export device representable frequencies are skipped without aliasing.
-      const companions=Harmonics.playable(State.freq).filter(r=>r.usable&&r.hz<nyq*0.94);
+      const companions=Harmonics.playable(State.freq,nyq).filter(r=>r.usable&&r.hz<nyq*0.94);
       const part=Harmonics.strength(),norm=1/(1+companions.length*part);
       const series=[{hz:State.freq,amp:norm},...companions.map(r=>({hz:r.hz,amp:norm*part}))];
       for(let i=0;i<N;i++){let v=0;const t=i/sr;for(const c of series)v+=Math.sin(2*Math.PI*c.hz*t)*c.amp;buf[i]=v*0.5;}
@@ -1890,6 +1895,18 @@ const posFromFreq=f=>1000*Math.log(f/State.fmin)/Math.log(State.fmax/State.fmin)
 document.querySelectorAll('#srcChips .chip').forEach(c=>c.onclick=()=>{document.querySelectorAll('#srcChips .chip').forEach(x=>x.classList.remove('on'));c.classList.add('on');State.src=c.dataset.src;State.lastEngine='single';Viz.vfadeStart=performance.now();if(State.playing)Audio.start();UI.freqV();UI.syncNoise();UI.syncPlay();});
 {const nt=$('noiseTilt');if(nt)nt.addEventListener('input',()=>{State.noiseTilt=clamp(+nt.value/100,0,1);UI.syncNoise();});}
 document.querySelectorAll('#vizChips .chip').forEach(c=>c.onclick=()=>{document.querySelectorAll('#vizChips .chip').forEach(x=>x.classList.remove('on'));c.classList.add('on');State.viz=c.dataset.v;Viz.fall=null;Viz.vfadeStart=performance.now();const fp=$('fallPanel');if(fp)fp.style.display=(State.viz==='fall')?'':'none';});
+(function(){
+  const b=$('vizReveal');if(!b)return;
+  b.addEventListener('click',()=>{
+    const expanded=document.body.classList.toggle('viz-expanded');
+    b.setAttribute('aria-expanded',String(expanded));
+    b.textContent=expanded?'Show fewer visualizers':'Explore 14 more visualizers';
+    if(!expanded&&document.querySelector('#vizChips .viz-advanced.on')){
+      const first=document.querySelector('#vizChips [data-v="wave"]');
+      if(first)first.click(); // keep selected view visible without changing audio
+    }
+  });
+})();
 function fallSyncUI(){const c=Viz.fallCfg;if($('fallPal'))$('fallPal').value=c.pal;
   if($('fallFloor')){$('fallFloor').value=Math.round(c.floor*100);if($('fallFloorV'))$('fallFloorV').textContent=Math.round(c.floor*100)+'%';}
   if($('fallGain')){$('fallGain').value=Math.round(c.gain*10);if($('fallGainV'))$('fallGainV').textContent=c.gain.toFixed(1)+'×';}
@@ -3006,6 +3023,10 @@ const Mode={
   cur:'beginner',
   tag(starts,cls){var ps=document.querySelectorAll('.panel');for(var i=0;i<ps.length;i++){var t=ps[i].querySelector('.ptitle');if(!t)continue;var s=t.textContent.trim();for(var j=0;j<starts.length;j++){if(s.indexOf(starts[j])===0){ps[i].classList.add(cls);break;}}}},
   set(m){this.cur=m;var b=document.body;b.classList.remove('exp-beginner','exp-tech','exp-expert');b.classList.add('exp-'+m);
+    if(m==='beginner'&&document.querySelector('#vizChips .viz-advanced.on')){
+      b.classList.add('viz-expanded');
+      const reveal=$('vizReveal');if(reveal){reveal.textContent='Show fewer visualizers';reveal.setAttribute('aria-expanded','true');}
+    }
     var seg=document.getElementById('expSeg');if(seg){var bs=seg.querySelectorAll('button');for(var i=0;i<bs.length;i++)bs[i].classList.toggle('on',bs[i].getAttribute('data-exp')===m);}
     try{localStorage.setItem('spectrum-exp',m);}catch(e){}if(window.Core)window.Core.log('event','skill level → '+m);},
   init(){this.tag(['Signal Detective','Sweep','Export','Frequency Family'],'lvl-tech');this.tag(['Calibration','Hardware Bridge','Presets'],'lvl-adv');
