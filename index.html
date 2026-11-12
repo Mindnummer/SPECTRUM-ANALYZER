@@ -1845,7 +1845,8 @@ const References={
     const playing=State.playing||(typeof Mixer!=='undefined'&&Mixer.playing);
     if(!playing||!Audio.analyser||!Audio.freqB)return [];
     const now=performance.now();if(this._cache&&now-this._cacheAt<180)return this._cache;
-    const B=Audio.freqB,N=B.length,d=this.binHz(),lo=Math.max(1,Math.floor(this.displayRange().lo/d)),hi=Math.min(N-2,Math.ceil(this.displayRange().hi/d));
+    const B=Audio.freqB,N=B.length,d=this.binHz(),range=this.spectral()?this.displayRange():{lo:0,hi:this.nyq()},
+      lo=Math.max(1,Math.floor(range.lo/d)),hi=Math.min(N-2,Math.ceil(range.hi/d));
     const hits=[];
     if(hi>lo+2)for(let i=Math.max(2,lo);i<=hi;i++){
       const v=B[i];
@@ -1864,12 +1865,12 @@ const References={
   },
   label(ctx,x,y,value,fg='#e8f5e9'){
     const text=String(value),W=Viz.W;
-    ctx.font="600 10px 'Space Mono',monospace";
+    ctx.font="600 11px 'Space Mono',monospace";
     const tw=Math.ceil(ctx.measureText(text).width),pad=5,bw=tw+pad*2;
-    const bx=Math.max(2,Math.min(Math.max(2,W-bw-2),x-bw/2)),by=Math.max(0,y-12);
-    ctx.fillStyle='rgba(4,10,13,.94)';ctx.fillRect(bx,by,bw,16);
-    ctx.strokeStyle='rgba(160,196,188,.38)';ctx.lineWidth=.6;ctx.strokeRect(bx,by,bw,16);
-    ctx.fillStyle=fg;ctx.textAlign='left';ctx.textBaseline='middle';ctx.fillText(text,bx+pad,by+8);
+    const bx=Math.max(2,Math.min(Math.max(2,W-bw-2),x-bw/2)),by=Math.max(0,y-13);
+    ctx.fillStyle='rgba(4,10,13,.94)';ctx.fillRect(bx,by,bw,18);
+    ctx.strokeStyle='rgba(160,196,188,.38)';ctx.lineWidth=.6;ctx.strokeRect(bx,by,bw,18);
+    ctx.fillStyle=fg;ctx.textAlign='left';ctx.textBaseline='middle';ctx.fillText(text,bx+pad,by+9);
   },
   tickValues(lo,hi,px,logarithmic){
     if(!(hi>lo)||!Number.isFinite(lo)||!Number.isFinite(hi))return [];
@@ -1909,7 +1910,7 @@ const References={
         this.label(ctx,x,H-6,this.tickText(f,view.hi-view.lo));
       }else{
         const x=u*W;drawAt(x);
-        if(x-last<56)continue;last=x;
+        if(x-last<70)continue;last=x;
         this.label(ctx,x,H-6,this.tickText(f,view.hi-view.lo));
       }
     }
@@ -1960,7 +1961,7 @@ const References={
     ctx.fillStyle='rgba(4,10,13,.9)';ctx.fillRect(0,0,W,30);
     ctx.font="600 10px 'Space Mono',monospace";ctx.fillStyle='#d5ffee';ctx.textAlign='left';ctx.textBaseline='middle';
     ctx.fillText('RADIAL Hz · clockwise from right',8,10);
-    ctx.fillText(this.hz(lo)+' Hz → '+this.hz(hi)+' Hz (seam at 3 o’clock)',8,23);
+    ctx.fillText(this.hz(lo)+' → '+this.hz(hi)+' Hz · '+(State.src==='tone'?'SET '+this.fullHz(State.freq):'FFT peaks marked by radius'),8,23);
   },
   spiral(ctx){
     const W=Viz.W,H=Viz.H,cx=W/2,cy=H/2,R=Math.min(W,H)*.41,{lo,hi}=this.displayRange();
@@ -1973,7 +1974,7 @@ const References={
     ctx.fillStyle='rgba(4,10,13,.9)';ctx.fillRect(0,0,W,29);
     ctx.font="600 10px 'Space Mono',monospace";ctx.fillStyle='#d5ffee';ctx.textAlign='left';ctx.textBaseline='middle';
     ctx.fillText('PITCH SPIRAL · radius = log Hz',8,10);
-    ctx.fillText(this.hz(lo)+' → '+this.hz(hi)+' Hz · angle = octave position',8,22);
+    ctx.fillText(this.hz(lo)+' → '+this.hz(hi)+' Hz · '+(State.src==='tone'?'SET '+this.fullHz(State.freq):'angle = octave position'),8,22);
   },
   timeAxis(ctx,kind){
     const W=Viz.W,H=Viz.H,sr=Audio.ctx?Audio.ctx.sampleRate:44100;
@@ -1983,12 +1984,19 @@ const References={
       const M=typeof Mixer!=='undefined'?Mixer:null,tones=M&&M.layers?M.layers.filter(l=>l.type==='tone'):[],low=tones.length?Math.min(...tones.map(t=>t.freq)):440;
       duration=Math.min(.05,3/Math.max(1,low))*1000;
     }
-    ctx.fillStyle='rgba(4,10,13,.9)';ctx.fillRect(0,0,W,23);ctx.fillRect(0,H-27,W,27);
+    ctx.fillStyle='rgba(4,10,13,.9)';ctx.fillRect(0,0,W,41);ctx.fillRect(0,H-27,W,27);
     ctx.fillStyle='#d5ffee';ctx.font="600 10px 'Space Mono',monospace";ctx.textAlign='left';ctx.textBaseline='middle';
     ctx.fillText('TIME-DOMAIN · horizontal = milliseconds',8,12);
+    let signal=State.src==='tone'?'SET '+this.fullHz(State.freq):'SOURCE '+State.src;
+    if(kind==='blend'&&typeof Mixer!=='undefined'&&Mixer.playing){
+      const tones=Mixer.layers.filter(l=>l.type==='tone'&&!l.muted).slice(0,3);
+      if(tones.length)signal='BLEND '+tones.map(t=>this.hz(t.freq)+'Hz').join(' + ');
+    }
+    const strongest=this.peaks()[0];if(strongest)signal+=' · FFT peak ≈'+this.estimatedPeakText(strongest.f);
+    ctx.fillStyle='#9bd9c4';ctx.fillText(signal.slice(0,Math.max(25,Math.floor(W/7))),8,30);
     for(let i=0;i<=4;i++){
       const x=W*i/4,ms=duration*i/4;
-      ctx.strokeStyle='rgba(180,226,207,.25)';ctx.beginPath();ctx.moveTo(x,23);ctx.lineTo(x,H-27);ctx.stroke();
+      ctx.strokeStyle='rgba(180,226,207,.25)';ctx.beginPath();ctx.moveTo(x,41);ctx.lineTo(x,H-27);ctx.stroke();
       this.label(ctx,x,H-6,(ms>=10?ms.toFixed(1):ms.toFixed(2))+' ms');
     }
   },
@@ -2007,6 +2015,9 @@ const References={
         last=x;this.label(ctx,x,y+27,this.hz(f)+' Hz');
       });
     };
+    ctx.fillStyle='rgba(4,10,13,.90)';ctx.fillRect(0,0,W,28);
+    ctx.fillStyle='#d5ffee';ctx.font="600 11px 'Space Mono',monospace";ctx.textBaseline='middle';ctx.textAlign='left';
+    ctx.fillText(State.src==='tone'?'SET '+this.fullHz(State.freq)+' · modeled light colors':'DIGITAL spectrum · modeled light colors',8,14);
     drawTicks([370,400,450,500,550,600,650,700],f=>(f-363)/(717-363),H*.66,'TOP · modeled octave-to-color mapping');
     drawTicks([20,50,100,200,500,1000,2000,5000,10000,20000],f=>Math.log(f/20)/Math.log(1000),H*.77,'BOTTOM · 20–20kHz → log frequency mapping');
   },
@@ -2021,12 +2032,18 @@ const References={
     ctx.fillStyle='rgba(3,9,13,.9)';ctx.fillRect(0,0,W,37);
     ctx.font="600 10px 'Space Mono',monospace";ctx.textBaseline='middle';ctx.fillStyle='#d5ffee';ctx.textAlign='left';
     ctx.fillText(desc,8,12);
-    const known=State.src==='tone'?'SET '+this.fullHz(State.freq):'SOURCE '+State.src;
-    ctx.fillStyle='#a9c9bd';ctx.fillText(known,8,27);
+    const strongest=this.peaks()[0];
+    const known=(State.src==='tone'?'SET '+this.fullHz(State.freq):'SOURCE '+State.src)+
+      (strongest?' · FFT peak ≈'+this.estimatedPeakText(strongest.f):'');
+    ctx.fillStyle='#a9c9bd';ctx.fillText(known.slice(0,Math.max(20,Math.floor(W/7))),8,27);
     if(mode==='liss'){
-      ctx.strokeStyle='rgba(191,226,208,.3)';ctx.beginPath();ctx.moveTo(W/2,37);ctx.lineTo(W/2,H);ctx.moveTo(0,H/2);ctx.lineTo(W,H/2);ctx.stroke();
-      ctx.font="500 9px 'Space Mono',monospace";ctx.fillStyle='#bbded0';ctx.fillText('Y=0',W/2+4,H/2-8);
-      ctx.textAlign='right';ctx.fillText('X=+1',W-6,H/2+11);
+      ctx.font="500 9px 'Space Mono',monospace";
+      for(const v of [-1,-0.5,0,0.5,1]){
+        const x=W/2+v*W*.42,y=H/2-v*H*.42;
+        ctx.strokeStyle=v===0?'rgba(191,226,208,.45)':'rgba(191,226,208,.15)';
+        ctx.beginPath();ctx.moveTo(x,37);ctx.lineTo(x,H);ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();
+        ctx.fillStyle='#a8c9b9';if(v===0||Math.abs(v)===1){ctx.textAlign='center';ctx.fillText('X '+v.toFixed(0),x,H-7);ctx.textAlign='left';ctx.fillText('Y '+v.toFixed(0),4,Math.max(42,Math.min(H-4,y-5)));}
+      }
     }
   },
   draw(customCtx){
