@@ -1785,6 +1785,8 @@ const References={
     if(note)note.textContent=this.resolutionNote()+
       (m==='fall'&&Viz.fallCfg.log?' Waterfall logarithmic-warp switch is ON.':'')+
       ' Peak markers estimate signals within the digital analyzer, not calibrated sound emitted by speakers.'+
+      ((m==='spec'||m==='bars')?' Vertical percentages are relative analyzer display levels, not acoustic dB SPL.':'')+
+      ((m==='constel'||m==='spiral')?' Log displays omit frequencies below 20 Hz'+(m==='spiral'?' and above 16 kHz':'')+'.':'')+
       (m==='color'?' The color conversion is modeled, not an optical measurement.':'');
   },
   savedFFT(){try{const z=Number(localStorage.getItem('spectrum_ref_fft'));return [2048,8192,16384,32768].includes(z)?z:2048;}catch(e){return 2048;}},
@@ -1891,7 +1893,7 @@ const References={
     const W=Viz.W,H=Viz.H,view=this.displayRange();
     ctx.fillStyle='rgba(3,9,13,.87)';ctx.fillRect(0,0,W,23);ctx.fillRect(0,H-29,W,29);
     ctx.font="600 10px 'Space Mono',monospace";ctx.fillStyle='#dafff0';ctx.textAlign='left';ctx.textBaseline='middle';
-    const desc=mode==='fall'?'WATERFALL · latest bottom':mode==='s3d'?'3D · foreground ruler':mode==='constel'?'LOG Hz →':mode==='twin'?'MIRRORED Hz ↔':'FREQUENCY · Hz →';
+    const desc=mode==='fall'?'WATERFALL · latest bottom':mode==='s3d'?'3D · foreground ruler':mode==='constel'?'LOG Hz →':mode==='twin'?'MIRRORED Hz ↔':(mode==='spec'||mode==='bars')?'Hz → · REL FFT display':'FREQUENCY · Hz →';
     ctx.fillText(desc,9,11);
     const topNote='Δf≈'+this.hz(this.binHz())+' Hz';
     ctx.textAlign='right';ctx.fillStyle='#a0c5ba';ctx.fillText(topNote,W-8,11);
