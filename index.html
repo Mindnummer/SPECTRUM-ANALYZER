@@ -1936,7 +1936,7 @@ const References={
       if(mode==='twin'){ctx.beginPath();ctx.moveTo(W-x,23);ctx.lineTo(W-x,H-29);ctx.stroke();}
       return x;
     };
-    if(State.src==='tone'&&Number.isFinite(State.freq)){const x=mark(State.freq,'rgba(58,255,160,.83)',[3,5]);if(x!==null)this.label(ctx,x,43,'SET '+this.hz(State.freq)+' Hz','#7dffd0');}
+    if(State.src==='tone'&&Number.isFinite(State.freq)&&!(typeof Mixer!=='undefined'&&Mixer.playing)){const x=mark(State.freq,'rgba(58,255,160,.83)',[3,5]);if(x!==null)this.label(ctx,x,43,'SET '+this.hz(State.freq)+' Hz','#7dffd0');}
     const peaks=this.peaks();let shown=0,lastPeak=-1e8;
     for(const p of peaks){
       const x=mark(p.f,'rgba(255,198,85,.87)',[7,4]);
@@ -1961,7 +1961,7 @@ const References={
     ctx.fillStyle='rgba(4,10,13,.9)';ctx.fillRect(0,0,W,30);
     ctx.font="600 10px 'Space Mono',monospace";ctx.fillStyle='#d5ffee';ctx.textAlign='left';ctx.textBaseline='middle';
     ctx.fillText('RADIAL Hz · clockwise from right',8,10);
-    ctx.fillText(this.hz(lo)+' → '+this.hz(hi)+' Hz · '+(State.src==='tone'?'SET '+this.fullHz(State.freq):'FFT peaks marked by radius'),8,23);
+    ctx.fillText(this.hz(lo)+' → '+this.hz(hi)+' Hz · '+(State.src==='tone'&&!(typeof Mixer!=='undefined'&&Mixer.playing)?'SET '+this.fullHz(State.freq):'FFT peaks marked by radius'),8,23);
   },
   spiral(ctx){
     const W=Viz.W,H=Viz.H,cx=W/2,cy=H/2,R=Math.min(W,H)*.41,{lo,hi}=this.displayRange();
@@ -1974,7 +1974,7 @@ const References={
     ctx.fillStyle='rgba(4,10,13,.9)';ctx.fillRect(0,0,W,29);
     ctx.font="600 10px 'Space Mono',monospace";ctx.fillStyle='#d5ffee';ctx.textAlign='left';ctx.textBaseline='middle';
     ctx.fillText('PITCH SPIRAL · radius = log Hz',8,10);
-    ctx.fillText(this.hz(lo)+' → '+this.hz(hi)+' Hz · '+(State.src==='tone'?'SET '+this.fullHz(State.freq):'angle = octave position'),8,22);
+    ctx.fillText(this.hz(lo)+' → '+this.hz(hi)+' Hz · '+(State.src==='tone'&&!(typeof Mixer!=='undefined'&&Mixer.playing)?'SET '+this.fullHz(State.freq):'angle = octave position'),8,22);
   },
   timeAxis(ctx,kind){
     const W=Viz.W,H=Viz.H,sr=Audio.ctx?Audio.ctx.sampleRate:44100;
@@ -1988,9 +1988,9 @@ const References={
     ctx.fillStyle='#d5ffee';ctx.font="600 10px 'Space Mono',monospace";ctx.textAlign='left';ctx.textBaseline='middle';
     ctx.fillText('TIME-DOMAIN · horizontal = milliseconds',8,12);
     let signal=State.src==='tone'?'SET '+this.fullHz(State.freq):'SOURCE '+State.src;
-    if(kind==='blend'&&typeof Mixer!=='undefined'&&Mixer.playing){
+    if(typeof Mixer!=='undefined'&&Mixer.playing){
       const tones=Mixer.layers.filter(l=>l.type==='tone'&&!l.muted).slice(0,3);
-      if(tones.length)signal='BLEND '+tones.map(t=>this.hz(t.freq)+'Hz').join(' + ');
+      signal=tones.length?'BLEND '+tones.map(t=>this.hz(t.freq)+'Hz').join(' + '):'BLEND · mixed signal';
     }
     const strongest=this.peaks()[0];if(strongest)signal+=' · FFT peak ≈'+this.estimatedPeakText(strongest.f);
     ctx.fillStyle='#9bd9c4';ctx.fillText(signal.slice(0,Math.max(25,Math.floor(W/7))),8,30);
@@ -2017,7 +2017,7 @@ const References={
     };
     ctx.fillStyle='rgba(4,10,13,.90)';ctx.fillRect(0,0,W,28);
     ctx.fillStyle='#d5ffee';ctx.font="600 11px 'Space Mono',monospace";ctx.textBaseline='middle';ctx.textAlign='left';
-    ctx.fillText(State.src==='tone'?'SET '+this.fullHz(State.freq)+' · modeled light colors':'DIGITAL spectrum · modeled light colors',8,14);
+    ctx.fillText(State.src==='tone'&&!(typeof Mixer!=='undefined'&&Mixer.playing)?'SET '+this.fullHz(State.freq)+' · modeled light colors':'DIGITAL spectrum · modeled light colors',8,14);
     drawTicks([370,400,450,500,550,600,650,700],f=>(f-363)/(717-363),H*.66,'TOP · modeled octave-to-color mapping');
     drawTicks([20,50,100,200,500,1000,2000,5000,10000,20000],f=>Math.log(f/20)/Math.log(1000),H*.77,'BOTTOM · 20–20kHz → log frequency mapping');
   },
@@ -2033,7 +2033,7 @@ const References={
     ctx.font="600 10px 'Space Mono',monospace";ctx.textBaseline='middle';ctx.fillStyle='#d5ffee';ctx.textAlign='left';
     ctx.fillText(desc,8,12);
     const strongest=this.peaks()[0];
-    const known=(State.src==='tone'?'SET '+this.fullHz(State.freq):'SOURCE '+State.src)+
+    const known=(typeof Mixer!=='undefined'&&Mixer.playing?'BLEND signal':State.src==='tone'?'SET '+this.fullHz(State.freq):'SOURCE '+State.src)+
       (strongest?' · FFT peak ≈'+this.estimatedPeakText(strongest.f):'');
     ctx.fillStyle='#a9c9bd';ctx.fillText(known.slice(0,Math.max(20,Math.floor(W/7))),8,27);
     if(mode==='liss'){
