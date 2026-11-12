@@ -1405,7 +1405,7 @@ const Audio={
       node.connect(this.trem);               // output bus -> limiter
     }
     State.playing=true;
-    Session.start();this.syncHarmonics();
+    Session.start();this.syncHarmonics();References.syncPanel();
     this.outGain.gain.setTargetAtTime(State.src==='mic'?0.0001:this.effGain(),a.currentTime,Math.max(0.004,State.fade/3));
     this.setMonitor(State.monitor);
     this.armAutoStop();
@@ -1696,6 +1696,17 @@ const References={
     return f.toFixed(f>=1?2:3);
   },
   fullHz(f){return Number.isFinite(f)?Number(f.toPrecision(8)).toLocaleString(undefined,{maximumFractionDigits:3})+' Hz':'—';},
+  tickText(f,span){
+    if(!Number.isFinite(f))return '—';
+    if(span<0.1)return f.toFixed(3)+' Hz';
+    if(span<1)return f.toFixed(2)+' Hz';
+    if(span<10)return f.toFixed(1)+' Hz';
+    return this.hz(f)+' Hz';
+  },
+  estimatedPeakText(f){
+    const decimals=this.binHz()<3?1:0;
+    return (f>=1000?(f/1000).toFixed(decimals?3:2)+'k':f.toFixed(decimals))+' Hz';
+  },
   nyq(){return Audio.nyquist();},
   binHz(){return (Audio.ctx?Audio.ctx.sampleRate:44100)/((Audio.analyser&&Audio.analyser.fftSize)||2048);},
   viewport(){const n=this.nyq();return {lo:Math.max(0,Viz.fzLo*Viz.fzLo*n),hi:Math.min(n,Viz.fzHi*Viz.fzHi*n)};},
@@ -1771,7 +1782,9 @@ const References={
     if(sel&&document.activeElement!==sel)sel.value=String((Audio.analyser&&Audio.analyser.fftSize)||this.savedFFT());
     const resolution=$('refFFTResolution');if(resolution)resolution.textContent='≈ '+this.hz(this.binHz())+' Hz/bin';
     const note=$('refStatus');
-    if(note)note.textContent=this.resolutionNote()+(m==='fall'&&Viz.fallCfg.log?' Waterfall logarithmic-warp switch is ON.':'');
+    if(note)note.textContent=this.resolutionNote()+
+      (m==='fall'&&Viz.fallCfg.log?' Waterfall logarithmic-warp switch is ON.':'')+
+      ' Peak markers estimate signals within the digital analyzer, not calibrated sound emitted by speakers.';
   },
   savedFFT(){try{const z=Number(localStorage.getItem('spectrum_ref_fft'));return [2048,8192,16384,32768].includes(z)?z:2048;}catch(e){return 2048;}},
   saveFFT(n){try{localStorage.setItem('spectrum_ref_fft',String(n));}catch(e){}},
@@ -1888,17 +1901,17 @@ const References={
       if(mode==='twin'){
         const x=W/2+u*W/2;drawAt(x);drawAt(W-x);
         if(x-last<55)continue;last=x;
-        this.label(ctx,x,H-6,this.hz(f));
+        this.label(ctx,x,H-6,this.tickText(f,view.hi-view.lo));
       }else{
         const x=u*W;drawAt(x);
         if(x-last<56)continue;last=x;
-        this.label(ctx,x,H-6,this.hz(f));
+        this.label(ctx,x,H-6,this.tickText(f,view.hi-view.lo));
       }
     }
     // Physical frequency labels at both ends even for narrow, non-rounded windows.
     if(ticks.length===0){
-      this.label(ctx,Math.min(40,W*.12),H-6,this.hz(view.lo));
-      this.label(ctx,W-35,H-6,this.hz(view.hi));
+      this.label(ctx,Math.min(40,W*.12),H-6,this.tickText(view.lo,view.hi-view.lo));
+      this.label(ctx,W-35,H-6,this.tickText(view.hi,view.hi-view.lo));
     }
     // Relative spectral magnitude: NOT decibels SPL and NOT calibrated microphone sensitivity.
     if(mode==='spec'||mode==='bars'){
@@ -1922,7 +1935,7 @@ const References={
     for(const p of peaks){
       const x=mark(p.f,'rgba(255,198,85,.87)',[7,4]);
       if(x===null||Math.abs(x-lastPeak)<80)continue;
-      this.label(ctx,x,62+(shown%2)*18,'PEAK ~'+this.hz(p.f)+' Hz','#ffdc86');
+      this.label(ctx,x,62+(shown%2)*18,'FFT PEAK ≈'+this.estimatedPeakText(p.f),'#ffdc86');
       lastPeak=x;shown++;if(shown>=2)break;
     }
     const cursorHz=this.frequency(this.cursor,mode);
@@ -2101,7 +2114,7 @@ const Viz={
   fallColor(v,pal){if(pal==='classic')return `hsl(${200-v*200},90%,${10+v*55}%)`;if(pal==='gray'){const g=Math.round(v*255);return `rgb(${g},${g},${g})`;}const S=this.PAL[pal];if(!S)return `hsl(${200-v*200},90%,${10+v*55}%)`;const n=S.length-1,t=Math.max(0,Math.min(1,v))*n,i=Math.min(n-1,Math.floor(t)),f=t-i,a=S[i],b=S[i+1];return `rgb(${Math.round(a[0]+(b[0]-a[0])*f)},${Math.round(a[1]+(b[1]-a[1])*f)},${Math.round(a[2]+(b[2]-a[2])*f)})`;},
   saveFall(){try{if(!this.fall)return false;
     const out=document.createElement('canvas');out.width=this.fall.width;out.height=this.fall.height;
-    const gc=out.getContext('2d');gc.drawImage(this.fall,0,0);gc.setTransform(this.DPR,0,0,this.DPR,0,0);
+    const gc=out.getContext('2d');gc.drawImage(this.fall,0,0); // Backing pixels already equal CSS pixels; do not apply DPR again.
     // The exported PNG includes exactly the labeled ruler shown on the live waterfall.
     References.draw(gc);
     const a=document.createElement('a');a.download='waterfall-'+Date.now()+'.png';a.href=out.toDataURL('image/png');a.click();return true;
