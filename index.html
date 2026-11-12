@@ -1784,7 +1784,8 @@ const References={
     const note=$('refStatus');
     if(note)note.textContent=this.resolutionNote()+
       (m==='fall'&&Viz.fallCfg.log?' Waterfall logarithmic-warp switch is ON.':'')+
-      ' Peak markers estimate signals within the digital analyzer, not calibrated sound emitted by speakers.';
+      ' Peak markers estimate signals within the digital analyzer, not calibrated sound emitted by speakers.'+
+      (m==='color'?' The color conversion is modeled, not an optical measurement.':'');
   },
   savedFFT(){try{const z=Number(localStorage.getItem('spectrum_ref_fft'));return [2048,8192,16384,32768].includes(z)?z:2048;}catch(e){return 2048;}},
   saveFFT(n){try{localStorage.setItem('spectrum_ref_fft',String(n));}catch(e){}},
@@ -1797,7 +1798,11 @@ const References={
   },
   zoomSlider(value){
     const n=this.nyq(),t=Math.max(0,Math.min(100,Number(value)))/100;
-    const span=Math.pow(10000,-t),central=Math.sqrt(Math.min(n,Math.max(0,State.freq))/n);
+    const span=Math.pow(10000,-t);
+    let target=State.freq;
+    if(State.src==='mic'||State.src==='static'){const p=this.peaks()[0];if(p)target=p.f;}
+    // First zoom centers on the tone or strongest FFT peak; further zooms retain the focused window.
+    const central=(Viz.fzHi-Viz.fzLo)<0.999?(Viz.fzLo+Viz.fzHi)/2:Math.sqrt(Math.min(n,Math.max(0,target))/n);
     let lo=central-span/2;lo=Math.max(0,Math.min(1-span,lo));
     return this.applyRange(lo*lo*n,(lo+span)*(lo+span)*n);
   },
@@ -1893,7 +1898,7 @@ const References={
     const ticks=this.tickValues(view.lo,view.hi,available,log||mode==='fall'&&Viz.fallCfg.log);
     let last=-1e8;
     const drawAt=x=>{
-      ctx.strokeStyle='rgba(131,206,196,.16)';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(x,23);ctx.lineTo(x,H-29);ctx.stroke();
+      ctx.strokeStyle='rgba(131,206,196,.16)';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(x,mode==='s3d'?H*.74:23);ctx.lineTo(x,H-29);ctx.stroke();
       ctx.strokeStyle='rgba(208,241,226,.85)';ctx.beginPath();ctx.moveTo(x,H-29);ctx.lineTo(x,H-20);ctx.stroke();
     };
     for(const f of ticks){
@@ -1913,7 +1918,7 @@ const References={
       this.label(ctx,Math.min(40,W*.12),H-6,this.tickText(view.lo,view.hi-view.lo));
       this.label(ctx,W-35,H-6,this.tickText(view.hi,view.hi-view.lo));
     }
-    // Relative spectral magnitude: NOT decibels SPL and NOT calibrated microphone sensitivity.
+    // FFT display scale (windowed dB mapped to 0–255); NOT acoustic power, voltage, or dB SPL.
     if(mode==='spec'||mode==='bars'){
       const scale=mode==='bars'?.92:1;
       ctx.font="500 9px 'Space Mono',monospace";ctx.textAlign='right';
@@ -2002,7 +2007,7 @@ const References={
         last=x;this.label(ctx,x,y+27,this.hz(f)+' Hz');
       });
     };
-    drawTicks([370,400,450,500,550,600,650,700],f=>(f-363)/(717-363),H*.66,'TOP · 363–717 Hz → visible-color mapping');
+    drawTicks([370,400,450,500,550,600,650,700],f=>(f-363)/(717-363),H*.66,'TOP · modeled octave-to-color mapping');
     drawTicks([20,50,100,200,500,1000,2000,5000,10000,20000],f=>Math.log(f/20)/Math.log(1000),H*.77,'BOTTOM · 20–20kHz → log frequency mapping');
   },
   conceptual(ctx,mode){
@@ -2089,7 +2094,7 @@ const Viz={
   },
   idle(){const sx=this.ctx;sx.fillStyle='#5f7d8c';sx.font="400 13px Sora";sx.textAlign='center';sx.fillText(State.playing?'…':'press ▶ Play',this.W/2,this.H/2);},
   vWave(col){const sx=this.ctx,T=Audio.timeF,N=T.length;sx.strokeStyle=col;sx.lineWidth=2;sx.beginPath();for(let i=0;i<N;i++){const x=i/(N-1)*this.W,y=this.H/2-T[i]*this.H*0.42;i?sx.lineTo(x,y):sx.moveTo(x,y);}sx.stroke();},
-  vSpec(col){const sx=this.ctx,B=Audio.freqB,N=B.length,W=this.W,H=this.H;sx.beginPath();sx.moveTo(0,H);for(let x=0;x<=W;x+=2){const idx=Math.floor(this.binFrac(x/W)*N),v=B[idx]/255;sx.lineTo(x,H-v*H);}sx.lineTo(W,H);sx.closePath();const g=sx.createLinearGradient(0,H,0,0);g.addColorStop(0,'rgba(58,255,160,.06)');g.addColorStop(1,col);sx.fillStyle=g;sx.globalAlpha=.9;sx.fill();sx.globalAlpha=1;sx.strokeStyle=col;sx.lineWidth=1.5;sx.stroke();},
+  vSpec(col){const sx=this.ctx,B=Audio.freqB,N=B.length,W=this.W,H=this.H;sx.beginPath();sx.moveTo(0,H);for(let x=0;x<=W;x+=2){const idx=Math.min(N-1,Math.floor(this.binFrac(x/W)*N)),v=B[idx]/255;sx.lineTo(x,H-v*H);}sx.lineTo(W,H);sx.closePath();const g=sx.createLinearGradient(0,H,0,0);g.addColorStop(0,'rgba(58,255,160,.06)');g.addColorStop(1,col);sx.fillStyle=g;sx.globalAlpha=.9;sx.fill();sx.globalAlpha=1;sx.strokeStyle=col;sx.lineWidth=1.5;sx.stroke();},
   vColor(){const sx=this.ctx,B=Audio.freqB,W=this.W,H=this.H;
     if(!B||!B.length){sx.fillStyle='#05070b';sx.fillRect(0,0,W,H);return;}
     const N=B.length,nyq=(Audio.nyquist&&Audio.nyquist())||22050,fLoV=363,fHiV=717,binOf=f=>{let i=(f/nyq*N)|0;return i<0?0:i>=N?N-1:i;};
@@ -2123,7 +2128,7 @@ const Viz={
     const c=this.fallCfg;this._fallAcc=(this._fallAcc||0)+(c.spd||1);let step=Math.floor(this._fallAcc);this._fallAcc-=step;
     if(step<1){sx.drawImage(this.fall,0,0);return;}if(step>6)step=6;
     fc.drawImage(this.fall,0,-step);const B=Audio.freqB,N=B.length,LB=50,fl=c.floor||0,gn=c.gain||1,lg=!!c.log;
-    for(let x=0;x<this.W;x+=2){let f=x/this.W;if(lg)f=(Math.pow(LB,f)-1)/(LB-1);const idx=Math.floor(this.binFrac(f)*N);let v=B[idx]/255-fl;if(v<0)v=0;v*=gn;if(v>1)v=1;fc.fillStyle=this.fallColor(v,c.pal);fc.fillRect(x,this.H-step,2,step);}
+    for(let x=0;x<this.W;x+=2){let f=x/this.W;if(lg)f=(Math.pow(LB,f)-1)/(LB-1);const idx=Math.min(N-1,Math.floor(this.binFrac(f)*N));let v=B[idx]/255-fl;if(v<0)v=0;v*=gn;if(v>1)v=1;fc.fillStyle=this.fallColor(v,c.pal);fc.fillRect(x,this.H-step,2,step);}
     sx.drawImage(this.fall,0,0);},
   vVoices(){const sx=this.ctx,W=this.W,H=this.H;sx.clearRect(0,0,W,H);
     const M=(typeof Mixer!=='undefined')?Mixer:null,layers=(M&&M.playing)?M.layers:[];
@@ -2141,16 +2146,16 @@ const Viz={
         sx.strokeStyle=col;sx.lineWidth=2;sx.beginPath();for(let x=0;x<W;x++){const idx=(x/W*buf.length)|0,v=(buf[idx]-128)/128,y=cy-v*amp;x?sx.lineTo(x,y):sx.moveTo(x,y);}sx.stroke();
         const bw=46,bx=W-bw-10,by=top+9,bh=8;sx.fillStyle=col+'22';sx.fillRect(bx,by,bw,bh);sx.fillStyle=col;sx.fillRect(bx,by,bw*Math.min(1,rms*2.6),bh);}
       if(i<n-1){sx.strokeStyle='#1b2730';sx.lineWidth=1;sx.beginPath();sx.moveTo(0,laneH*(i+1));sx.lineTo(W,laneH*(i+1));sx.stroke();}});},
-  vLand(col){const sx=this.ctx,B=Audio.freqB,N=B.length,rows=22;sx.strokeStyle=col;for(let r=rows;r>=0;r--){const off=r/rows;sx.beginPath();for(let x=0;x<this.W;x+=3){const idx=Math.floor(this.binFrac(x/this.W)*N),v=B[idx]/255,px=x*(0.7+0.3*off)+this.W*0.15*(1-off),py=this.H*0.78-off*this.H*0.5-v*this.H*0.28*(0.3+off);x?sx.lineTo(px,py):sx.moveTo(px,py);}sx.globalAlpha=0.25+0.6*off;sx.stroke();}sx.globalAlpha=1;},
-  vBars(col){const sx=this.ctx,B=Audio.freqB,N=B.length,bars=46,bw=this.W/bars;for(let b=0;b<bars;b++){const idx=Math.floor(this.binFrac(b/bars)*N),v=B[idx]/255,h=v*this.H*0.92;sx.fillStyle=`hsl(${150+v*130},90%,${28+v*38}%)`;sx.fillRect(b*bw+1,this.H-h,bw-2,h);}},
-  vRadial(col){const sx=this.ctx,B=Audio.freqB,N=B.length,cx=this.W/2,cy=this.H/2,R=Math.min(this.W,this.H)*0.16,SP=this.lowPerf?110:200;sx.lineWidth=2;for(let i=0;i<SP;i++){const idx=Math.floor(this.binFrac(i/SP)*N),v=B[idx]/255,a=i/SP*Math.PI*2,len=R+v*Math.min(this.W,this.H)*0.32;sx.strokeStyle=`hsla(${150+v*130},90%,${42+v*28}%,${0.35+0.65*v})`;sx.beginPath();sx.moveTo(cx+Math.cos(a)*R,cy+Math.sin(a)*R);sx.lineTo(cx+Math.cos(a)*len,cy+Math.sin(a)*len);sx.stroke();}},
+  vLand(col){const sx=this.ctx,B=Audio.freqB,N=B.length,rows=22;sx.strokeStyle=col;for(let r=rows;r>=0;r--){const off=r/rows;sx.beginPath();for(let x=0;x<this.W;x+=3){const idx=Math.min(N-1,Math.floor(this.binFrac(x/this.W)*N)),v=B[idx]/255,px=x*(0.7+0.3*off)+this.W*0.15*(1-off),py=this.H*0.78-off*this.H*0.5-v*this.H*0.28*(0.3+off);x?sx.lineTo(px,py):sx.moveTo(px,py);}sx.globalAlpha=0.25+0.6*off;sx.stroke();}sx.globalAlpha=1;},
+  vBars(col){const sx=this.ctx,B=Audio.freqB,N=B.length,bars=46,bw=this.W/bars;for(let b=0;b<bars;b++){const idx=Math.min(N-1,Math.floor(this.binFrac(b/bars)*N)),v=B[idx]/255,h=v*this.H*0.92;sx.fillStyle=`hsl(${150+v*130},90%,${28+v*38}%)`;sx.fillRect(b*bw+1,this.H-h,bw-2,h);}},
+  vRadial(col){const sx=this.ctx,B=Audio.freqB,N=B.length,cx=this.W/2,cy=this.H/2,R=Math.min(this.W,this.H)*0.16,SP=this.lowPerf?110:200;sx.lineWidth=2;for(let i=0;i<SP;i++){const idx=Math.min(N-1,Math.floor(this.binFrac(i/SP)*N)),v=B[idx]/255,a=i/SP*Math.PI*2,len=R+v*Math.min(this.W,this.H)*0.32;sx.strokeStyle=`hsla(${150+v*130},90%,${42+v*28}%,${0.35+0.65*v})`;sx.beginPath();sx.moveTo(cx+Math.cos(a)*R,cy+Math.sin(a)*R);sx.lineTo(cx+Math.cos(a)*len,cy+Math.sin(a)*len);sx.stroke();}},
   vLiss(col){const sx=this.ctx,T=Audio.timeF,N=T.length,off=Math.floor(N/4);sx.strokeStyle=col;sx.lineWidth=2;sx.beginPath();for(let i=0;i<N-off;i++){const x=this.W/2+T[i]*this.W*0.42,y=this.H/2-T[i+off]*this.H*0.42;i?sx.lineTo(x,y):sx.moveTo(x,y);}sx.stroke();},
   vPhasor(col){const sx=this.ctx,cx=this.W/2,cy=this.H/2,t=performance.now()/1000;let amp=0;for(let i=0;i<Audio.timeF.length;i++)amp=Math.max(amp,Math.abs(Audio.timeF[i]));const r=Math.min(this.W,this.H)*0.36*(0.2+amp),a=2*Math.PI*Math.min(State.freq,4)*t;sx.strokeStyle='rgba(255,255,255,.12)';sx.beginPath();sx.arc(cx,cy,Math.min(this.W,this.H)*0.36,0,7);sx.stroke();sx.strokeStyle=col;sx.lineWidth=2.5;sx.beginPath();sx.moveTo(cx,cy);sx.lineTo(cx+r*Math.cos(a),cy+r*Math.sin(a));sx.stroke();sx.fillStyle=col;sx.beginPath();sx.arc(cx+r*Math.cos(a),cy+r*Math.sin(a),5,0,7);sx.fill();},
   vChladni(){const sx=this.ctx,n=2+Math.round(State.freq/120)%6,m=2+Math.round(State.freq/90)%6,step=Math.max(this.lowPerf?9:5,Math.round(Math.min(this.W,this.H)/90));for(let y=0;y<this.H;y+=step)for(let x=0;x<this.W;x+=step){const u=x/this.W,v=y/this.H,z=Math.cos(n*Math.PI*u)*Math.cos(m*Math.PI*v)-Math.cos(m*Math.PI*u)*Math.cos(n*Math.PI*v);if(Math.abs(z)<0.06){sx.fillStyle='rgba(232,169,75,.85)';sx.fillRect(x,y,step-1,step-1);}}},
   vCymatic(col){const sx=this.ctx,cx=this.W/2,cy=this.H/2,t=performance.now()/600,k=State.freq/220;let amp=0.2;for(let i=0;i<Audio.timeF.length;i++)amp=Math.max(amp,Math.abs(Audio.timeF[i]));for(let r=4;r<Math.min(this.W,this.H)/2;r+=5){const a=Math.max(0,Math.sin(r*0.15*k-t)*amp);if(a<=0.02)continue;sx.strokeStyle=`hsla(${160+k*40},90%,60%,${a})`;sx.lineWidth=2;sx.beginPath();sx.arc(cx,cy,r,0,7);sx.stroke();}},
   vMirror(col){const sx=this.ctx,T=Audio.timeF,N=T.length,cx=this.W/2,cy=this.H/2,H=this.H;sx.strokeStyle=col;sx.lineWidth=2;const arm=(gx,gy)=>{sx.beginPath();for(let i=0;i<N;i++){const t=i/(N-1),x=cx+gx*t*cx,y=cy+gy*T[i]*H*0.42;i?sx.lineTo(x,y):sx.moveTo(x,y);}sx.stroke();};arm(1,1);arm(-1,1);arm(1,-1);arm(-1,-1);sx.fillStyle='#5f7d8c';sx.font="400 11px 'Space Mono'";sx.textAlign='center';sx.fillText('kaleidoscope · waveform mirrored 4 ways',cx,this.H-9);},
   vScope(col){const sx=this.ctx,T=Audio.timeF,N=T.length,cx=this.W/2,cy=this.H/2,R=Math.min(this.W,this.H)*0.42;sx.strokeStyle='rgba(255,255,255,.10)';sx.beginPath();sx.arc(cx,cy,R,0,7);sx.stroke();sx.strokeStyle=col;sx.lineWidth=2;sx.beginPath();for(let i=0;i<N;i++){const ang=i/N*Math.PI*2,rad=R*(0.30+0.66*((T[i]+1)/2)),x=cx+Math.cos(ang)*rad,y=cy+Math.sin(ang)*rad;i?sx.lineTo(x,y):sx.moveTo(x,y);}sx.closePath();sx.stroke();sx.fillStyle='#5f7d8c';sx.font="400 11px 'Space Mono'";sx.textAlign='center';sx.fillText('vectorscope · waveform wrapped to a ring',cx,this.H-9);},
-  vTwin(col){const sx=this.ctx,B=Audio.freqB,Nn=B.length,W=this.W,H=this.H,half=W/2;for(let x=0;x<half;x+=2){const idx=Math.floor(this.binFrac(x/half)*Nn),v=B[idx]/255,h=v*H*0.9;sx.fillStyle='hsl('+(160+v*120)+',90%,'+(28+v*38)+'%)';sx.fillRect(half+x,(H-h)/2,2,h);sx.fillRect(half-x-2,(H-h)/2,2,h);}sx.fillStyle='#5f7d8c';sx.font="400 11px 'Space Mono'";sx.textAlign='center';sx.fillText('mirrored spectrum · view low centre → view high outward',W/2,H-9);},
+  vTwin(col){const sx=this.ctx,B=Audio.freqB,Nn=B.length,W=this.W,H=this.H,half=W/2;for(let x=0;x<half;x+=2){const idx=Math.min(Nn-1,Math.floor(this.binFrac(x/half)*Nn)),v=B[idx]/255,h=v*H*0.9;sx.fillStyle='hsl('+(160+v*120)+',90%,'+(28+v*38)+'%)';sx.fillRect(half+x,(H-h)/2,2,h);sx.fillRect(half-x-2,(H-h)/2,2,h);}sx.fillStyle='#5f7d8c';sx.font="400 11px 'Space Mono'";sx.textAlign='center';sx.fillText('mirrored spectrum · view low centre → view high outward',W/2,H-9);},
   vConstellation(col){const sx=this.ctx,B=Audio.freqB,Nn=B.length,W=this.W,H=this.H,sr=Audio.ctx?Audio.ctx.sampleRate:48000,fft=Audio.analyser?Audio.analyser.fftSize:2048,nyq=sr/2,lo=Math.max(20,this.fzLo*this.fzLo*nyq),hi=this.fzHi*this.fzHi*nyq,span=Math.log(hi/lo);if(!(span>0))return;for(let i=2;i<Nn;i++){const v=B[i]/255;if(v<0.08)continue;const f=i*sr/fft;if(f<lo||f>hi)continue;const x=Math.log(f/lo)/span*W,y=H-v*H*0.9;sx.fillStyle='hsla('+(150+v*150)+',90%,'+(45+v*30)+'%,'+(0.25+0.7*v)+')';sx.beginPath();sx.arc(x,y,1+v*5,0,7);sx.fill();}sx.fillStyle='#5f7d8c';sx.font="400 11px 'Space Mono'";sx.textAlign='left';sx.fillText('log-frequency →   dot height = strength',10,16);},
   vSpiral(col){const sx=this.ctx,B=Audio.freqB,N=B.length,cx=this.W/2,cy=this.H/2,maxR=Math.min(this.W,this.H)*0.41,sr=Audio.ctx?Audio.ctx.sampleRate:48000,fft=Audio.analyser?Audio.analyser.fftSize:2048,nyq=sr/2,lo=Math.max(20,this.fzLo*this.fzLo*nyq),hi=Math.min(16000,this.fzHi*this.fzHi*nyq),span=Math.log2(hi/lo);if(!(span>0))return;for(let i=2;i<N;i++){const f=i*sr/fft;if(f<lo||f>hi)continue;const v=B[i]/255;if(v<0.06)continue;const oct=Math.log2(f/20),ang=(oct%1)*Math.PI*2-Math.PI/2,rad=maxR*(Math.log2(f/lo)/span),x=cx+Math.cos(ang)*rad,y=cy+Math.sin(ang)*rad;sx.fillStyle='hsla('+(150+v*140)+',90%,'+(40+v*30)+'%,'+(0.3+0.7*v)+')';sx.beginPath();sx.arc(x,y,1.5+v*4,0,7);sx.fill();}sx.fillStyle='#5f7d8c';sx.font="400 11px 'Space Mono'";sx.textAlign='center';sx.fillText('pitch spiral · octaves align by angle',cx,this.H-9);},
   vVerify(col){const sx=this.ctx,T=Audio.timeF,B=Audio.freqB,N=T.length,W=this.W,H=this.H;sx.strokeStyle=col;sx.lineWidth=2;sx.beginPath();for(let i=0;i<N;i++){const x=i/(N-1)*W,y=H*0.46-T[i]*H*0.32;i?sx.lineTo(x,y):sx.moveTo(x,y);}sx.stroke();let sum=0,peak=0;for(let i=0;i<N;i++){const v=T[i];sum+=v*v;const a=Math.abs(v);if(a>peak)peak=a;}const rms=Math.sqrt(sum/N),dbfs=rms>1e-6?20*Math.log10(rms):-99,clip=peak>0.985;const barY=H-26,bw=W-24,lvl=clamp((dbfs+60)/60,0,1);sx.fillStyle='rgba(255,255,255,.08)';sx.fillRect(12,barY,bw,12);sx.fillStyle=clip?'#ff6f60':(lvl>0.85?'#e8a94b':'#3affa0');sx.fillRect(12,barY,bw*lvl,12);let mi=2,mv=0;for(let i=2;i<B.length;i++){if(B[i]>mv){mv=B[i];mi=i;}}const measHz=(Audio.ctx&&mv>16)?mi*Audio.ctx.sampleRate/Audio.analyser.fftSize:0;sx.textAlign='left';sx.font='600 12px Sora';sx.fillStyle='#d6e7e0';sx.fillText('INPUT VERIFY',12,20);sx.font="400 12px 'Space Mono'";sx.fillStyle='#9fb3ad';sx.fillText(State.src==='tone'?('SET '+Math.round(State.freq)+' Hz'):('SRC '+State.src),12,38);if(State.src==='tone'&&measHz>0){const ok=Math.abs(measHz-State.freq)<Math.max(8,State.freq*0.04);sx.fillStyle=ok?'#3affa0':'#e8a94b';sx.fillText('MEAS '+Math.round(measHz)+' Hz '+(ok?'✓ match':'△ check'),12,54);}else if(measHz>0){sx.fillStyle='#9fb3ad';sx.fillText('peak ~'+Math.round(measHz)+' Hz (broadband)',12,54);}sx.textAlign='right';sx.fillStyle=clip?'#ff6f60':'#9fb3ad';sx.fillText((clip?'CLIP ':'')+dbfs.toFixed(1)+' dBFS',W-12,barY-6);sx.textAlign='left';},
