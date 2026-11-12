@@ -1032,7 +1032,7 @@ addEventListener('error',e=>{try{if(e.message&&/ResizeObserver loop/i.test(e.mes
 function safe(label,fn){try{fn();if(typeof Diag!=='undefined')Diag.mark(label);}catch(e){console.warn('init:'+label,e);try{const b=$('errbar');if(b){b.style.display='block';b.textContent='⚠ '+label+': '+((e&&e.message)||e);}}catch(_){}}}
 const Diag={
   done:Object.create(null),
-  EXPECT:['resize','freqV','syncPlay','hardware','watchdog','sweep','calibration','preset','syncUI','settings','display','dock','fz','selftest','mixer','harmonics','loop'],
+  EXPECT:['resize','freqV','syncPlay','hardware','watchdog','sweep','calibration','preset','syncUI','settings','display','dock','fz','references','selftest','mixer','harmonics','loop'],
   checks:[
     ['Render loop running', ()=>typeof Viz!=='undefined'&&!!Viz.raf],
     ['Audio engine', ()=>typeof Audio!=='undefined'&&!!Audio.ensure],
@@ -1042,7 +1042,8 @@ const Diag={
     ['Band-focus audio path', ()=>typeof Audio!=='undefined'&&!!Audio.setFocus],
     ['Transport dock', ()=>!!document.getElementById('dock')],
     ['Blend mixer', ()=>typeof Mixer!=='undefined'&&!!Mixer.add&&!!document.getElementById('mixer')],
-    ['Harmonic tone engine',()=>typeof Harmonics!=='undefined'&&!!Harmonics.playable&&!!document.getElementById('harmUpper')&&!!Audio.syncHarmonics]
+    ['Harmonic tone engine',()=>typeof Harmonics!=='undefined'&&!!Harmonics.playable&&!!document.getElementById('harmUpper')&&!!Audio.syncHarmonics],
+    ['Calibrated ruler engine',()=>typeof References!=='undefined'&&References.initDone&&!!document.getElementById('referencePanel')]
   ],
   mark(n){this.done[n]=true;},
   run(){
@@ -1339,7 +1340,7 @@ const Audio={
     // monitor bus (mic -> speakers ONLY if enabled)
     this.monitorGain=a.createGain(); this.monitorGain.gain.value=0.0001; this.monitorGain.connect(this.focus);
     // analysis bus (silent tap)
-    this.analyser=a.createAnalyser(); this.analyser.fftSize=2048; this.analyser.smoothingTimeConstant=0.75;
+    this.analyser=a.createAnalyser(); this.analyser.fftSize=References.savedFFT(); this.analyser.smoothingTimeConstant=0.75;
     this.freqF=new Float32Array(this.analyser.frequencyBinCount);
     this.freqB=new Uint8Array(this.analyser.frequencyBinCount);
     this.timeF=new Float32Array(this.analyser.fftSize);
@@ -1678,6 +1679,352 @@ function wlRGBa(w){if(w>780)return[38,5,5];if(w<360)return[30,4,46];let R=0,G=0,
   let a=w<420?0.3+0.7*(w-380)/40:w>700?0.3+0.7*(780-w)/80:1;a=Math.max(0,Math.min(1,a));
   return[(255*Math.max(0,R)*a)|0,(255*Math.max(0,G)*a)|0,(255*Math.max(0,B)*a)|0];}
 const VIZMAP={wave:'vWave',spec:'vSpec',fall:'vFall',s3d:'vLand',bars:'vBars',radial:'vRadial',phasor:'vPhasor',liss:'vLiss',chladni:'vChladni',cymatic:'vCymatic',color:'vColor',verify:'vVerify',mirror:'vMirror',spiral:'vSpiral',scope:'vScope',twin:'vTwin',constel:'vConstellation',blend:'vBlend',voices:'vVoices'};
+
+/* ========== CALIBRATED DISPLAY REFERENCES ==========
+   Only spectra have a frequency coordinate. Time plots get time axes; geometry gets honest model labels.
+   Coordinates exactly invert the visualization's sampling transforms, not an invented evenly spaced Hz axis.
+   Peak labels indicate approximate FFT estimates; bin spacing is exposed and is NOT an accuracy guarantee. */
+const References={
+  enabled:true, initDone:false, cursor:0.5, _cache:null,_cacheAt:0,
+  hz(f){
+    if(!Number.isFinite(f))return '—';
+    if(Math.abs(f)<1e-10)return '0 Hz';
+    if(f>=10000)return (f/1000).toFixed(f%1000===0?0:1)+'k';
+    if(f>=1000)return (f/1000).toFixed(f%1000===0?0:2)+'k';
+    if(f>=100)return Math.round(f).toLocaleString();
+    if(f>=10)return f.toFixed(f%1<.03?0:1);
+    return f.toFixed(f>=1?2:3);
+  },
+  fullHz(f){return Number.isFinite(f)?Number(f.toPrecision(8)).toLocaleString(undefined,{maximumFractionDigits:3})+' Hz':'—';},
+  nyq(){return Audio.nyquist();},
+  binHz(){return (Audio.ctx?Audio.ctx.sampleRate:44100)/((Audio.analyser&&Audio.analyser.fftSize)||2048);},
+  viewport(){const n=this.nyq();return {lo:Math.max(0,Viz.fzLo*Viz.fzLo*n),hi:Math.min(n,Viz.fzHi*Viz.fzHi*n)};},
+  modes:{spec:'FFT magnitude · nonlinear Hz x-axis',bars:'FFT bars · nonlinear Hz x-axis',
+    fall:'Waterfall · frequency left to right, newest data at bottom',
+    s3d:'Spectra-3D · frequency on front edge; back rows use perspective',
+    radial:'Radial FFT · frequency around ring, bar length is relative strength',
+    twin:'Mirrored spectrum · frequency runs outward in both directions',
+    constel:'Constellation · log Hz x-axis, strength determines height',
+    spiral:'Pitch spiral · log Hz by radius, note class by angle'},
+  spectral(){return !!this.modes[State.viz];},
+  type(){return State.viz;},
+  displayRange(){
+    const v=this.viewport(),m=this.type(),n=this.nyq();
+    if(m==='constel')return {lo:Math.max(20,v.lo),hi:v.hi};
+    if(m==='spiral')return {lo:Math.max(20,v.lo),hi:Math.min(16000,v.hi)};
+    return v;
+  },
+  position(f,mode=this.type()){
+    const n=this.nyq();
+    if(!(f>=0&&f<=n))return NaN;
+    if(mode==='constel'||mode==='spiral'){
+      const {lo,hi}=this.displayRange();
+      return f>=lo&&f<=hi&&hi>lo?Math.log(f/lo)/Math.log(hi/lo):NaN;
+    }
+    const span=Viz.fzHi-Viz.fzLo;
+    if(!(span>0))return NaN;
+    const u=(Math.sqrt(f/n)-Viz.fzLo)/span;
+    if(u<-1e-8||u>1+1e-8)return NaN;
+    if(mode==='fall'&&Viz.fallCfg.log)return Math.log(1+49*Math.max(0,u))/Math.log(50);
+    return Math.max(0,Math.min(1,u));
+  },
+  frequency(u,mode=this.type()){
+    u=Math.max(0,Math.min(1,u));
+    if(mode==='constel'||mode==='spiral'){
+      const {lo,hi}=this.displayRange();return hi>lo?lo*Math.pow(hi/lo,u):lo;
+    }
+    if(mode==='fall'&&Viz.fallCfg.log)u=(Math.pow(50,u)-1)/49;
+    const t=Viz.fzLo+u*(Viz.fzHi-Viz.fzLo);
+    return this.nyq()*t*t;
+  },
+  resolutionNote(){
+    const d=this.binHz(),v=this.displayRange(),bins=v.hi>v.lo?(v.hi-v.lo)/d:0;
+    if(!this.spectral())return 'FFT detail applies to signal measurements, but this view has no spatial Hz axis.';
+    if(!(bins>=2))return '⚠ Window narrower than two FFT bins ('+this.fullHz(d)+'/bin). Fine tick marks are positional, NOT independently resolvable tones.';
+    if(bins<5)return 'Only '+bins.toFixed(1)+' FFT bins span this window. Use Fine/Maximum FFT and longer stable recordings to distinguish nearby peaks.';
+    return 'FFT bin spacing ≈ '+this.fullHz(d)+'. This is spectral resolution, not calibrated sound-pressure or guaranteed frequency accuracy.';
+  },
+  syncPanel(){
+    const label=$('refMode');if(!label)return;
+    const m=this.type(),zoom=$('refZoomWrap'),n=this.nyq(),v=this.viewport(),range=this.displayRange(),isSpect=this.spectral();
+    const mode=this.modes[m]||({
+      wave:'Waveform · time axis in milliseconds',verify:'Input verification · time axis and measured FFT estimate',
+      voices:'Voice lanes · time axis; labels identify tone channels',blend:'Blend waves · time axis, not Hz position',
+      color:'Color comparison · two fixed frequency maps (top linear, bottom log)',
+      phasor:'Phasor · illustrative phase, not a frequency ring',liss:'Lissajous · signal amplitude × delayed amplitude',
+      chladni:'Chladni · mathematically MODELED nodes, not measured standing-wave positions',
+      cymatic:'Cymatic · artistically MODELED ripples; radius is not frequency',
+      mirror:'Kaleidoscope · mirrored time-domain waveform',
+      scope:'Vectorscope · waveform samples around ring, not frequency'
+    })[m]||'Signal view · no independent frequency-coordinate calibration';
+    label.textContent='View: '+mode;
+    if(zoom)zoom.style.display=isSpect?'':'none';
+    const zoomSlider=$('refZoom'),zoomVal=$('refZoomValue');
+    const span=Viz.fzHi-Viz.fzLo;
+    if(zoomSlider&&document.activeElement!==zoomSlider)zoomSlider.value=Math.round(100*Math.log(1/Math.max(0.0001,span))/Math.log(10000));
+    if(zoomVal)zoomVal.textContent=(1/span).toFixed(span<0.1?0:1)+'×';
+    const from=$('refFrom'),to=$('refTo');
+    if(from&&document.activeElement!==from)from.value=Number(v.lo.toPrecision(8));
+    if(to&&document.activeElement!==to)to.value=Number(v.hi.toPrecision(8));
+    const cu=$('refCursorValue');if(cu)cu.textContent=isSpect?this.fullHz(this.frequency(this.cursor)):'—';
+    const sel=$('refFFT');
+    if(sel&&document.activeElement!==sel)sel.value=String((Audio.analyser&&Audio.analyser.fftSize)||this.savedFFT());
+    const resolution=$('refFFTResolution');if(resolution)resolution.textContent='≈ '+this.hz(this.binHz())+' Hz/bin';
+    const note=$('refStatus');
+    if(note)note.textContent=this.resolutionNote()+(m==='fall'&&Viz.fallCfg.log?' Waterfall logarithmic-warp switch is ON.':'');
+  },
+  savedFFT(){try{const z=Number(localStorage.getItem('spectrum_ref_fft'));return [2048,8192,16384,32768].includes(z)?z:2048;}catch(e){return 2048;}},
+  saveFFT(n){try{localStorage.setItem('spectrum_ref_fft',String(n));}catch(e){}},
+  applyRange(lo,hi){
+    const n=this.nyq();
+    if(!Number.isFinite(lo)||!Number.isFinite(hi)||lo<0||hi>n||hi<=lo)return false;
+    const a=Math.sqrt(lo/n),b=Math.sqrt(hi/n);
+    if(!(b>a))return false;
+    Viz.fzLo=a;Viz.fzHi=b;Viz.fall=null;Viz.fzUpdate();this.syncPanel();return true;
+  },
+  zoomSlider(value){
+    const n=this.nyq(),t=Math.max(0,Math.min(100,Number(value)))/100;
+    const span=Math.pow(10000,-t),central=Math.sqrt(Math.min(n,Math.max(0,State.freq))/n);
+    let lo=central-span/2;lo=Math.max(0,Math.min(1-span,lo));
+    return this.applyRange(lo*lo*n,(lo+span)*(lo+span)*n);
+  },
+  center(){
+    const n=this.nyq(),span=Math.min(1,Viz.fzHi-Viz.fzLo);
+    let f=State.freq;
+    if(State.src==='mic'||State.src==='static'){
+      const p=this.peaks()[0];
+      if(p)f=p.f;
+    }
+    const mid=Math.sqrt(Math.max(0,Math.min(n,f))/n),lo=Math.min(1-span,Math.max(0,mid-span/2));
+    return this.applyRange(lo*lo*n,(lo+span)*(lo+span)*n);
+  },
+  init(){
+    if(this.initDone)return;this.initDone=true;
+    let stored=null;try{stored=localStorage.getItem('spectrum_ref_labels');}catch(e){}
+    this.enabled=stored!=='off';
+    const toggle=$('refToggle');if(toggle){toggle.checked=this.enabled;toggle.addEventListener('change',()=>{
+      this.enabled=!!toggle.checked;try{localStorage.setItem('spectrum_ref_labels',this.enabled?'on':'off');}catch(e){}
+    });}
+    const zoom=$('refZoom');if(zoom)zoom.addEventListener('input',()=>this.zoomSlider(zoom.value));
+    const apply=$('refApply');if(apply)apply.addEventListener('click',()=>{
+      const lo=Number($('refFrom').value),hi=Number($('refTo').value);
+      if(!this.applyRange(lo,hi)){const st=$('refStatus');if(st)st.textContent='Enter a valid range: 0 ≤ From < To ≤ Nyquist ('+this.fullHz(this.nyq())+').';}
+    });
+    for(const id of ['refFrom','refTo']){const el=$(id);if(el)el.addEventListener('keydown',e=>{if(e.key==='Enter'&&apply)apply.click();});}
+    const full=$('refFull');if(full)full.addEventListener('click',()=>this.applyRange(0,this.nyq()));
+    const center=$('refCenter');if(center)center.addEventListener('click',()=>this.center());
+    const cursor=$('refCursor');if(cursor)cursor.addEventListener('input',()=>{
+      this.cursor=Math.max(0,Math.min(1,+cursor.value/1000));this.syncPanel();
+    });
+    const fft=$('refFFT');if(fft){fft.value=String(this.savedFFT());fft.addEventListener('change',()=>{
+      const n=Number(fft.value);
+      if(Audio.setFFT(n)){this.saveFFT(n);this._cache=null;this.syncPanel();}
+    });}
+    this.syncPanel();
+  },
+  // A conservative, local peak finder. Avoids calling random broadband maxima "measured pure tones".
+  peaks(){
+    const playing=State.playing||(typeof Mixer!=='undefined'&&Mixer.playing);
+    if(!playing||!Audio.analyser||!Audio.freqB)return [];
+    const now=performance.now();if(this._cache&&now-this._cacheAt<180)return this._cache;
+    const B=Audio.freqB,N=B.length,d=this.binHz(),lo=Math.max(1,Math.floor(this.displayRange().lo/d)),hi=Math.min(N-2,Math.ceil(this.displayRange().hi/d));
+    const hits=[];
+    if(hi>lo+2)for(let i=Math.max(2,lo);i<=hi;i++){
+      const v=B[i];
+      if(v<70||v<B[i-1]||v<B[i+1])continue;
+      let sum=0,c=0;
+      for(let z=5;z<=11;z++){if(i-z>=1){sum+=B[i-z];c++;}if(i+z<N){sum+=B[i+z];c++;}}
+      const prominence=c?v-sum/c:0;
+      if(prominence<30)continue;
+      const a=B[i-1],bb=B[i],cc=B[i+1],den=a-2*bb+cc;
+      const frac=Math.abs(den)>1e-4?Math.max(-0.5,Math.min(0.5,0.5*(a-cc)/den)):0;
+      hits.push({f:(i+frac)*d,bin:i,strength:v,prominence});
+    }
+    hits.sort((a,b)=>b.prominence-a.prominence||b.strength-a.strength);
+    const chosen=[];for(const p of hits){if(chosen.length>=3)break;if(chosen.some(q=>Math.abs(p.f-q.f)<Math.max(d*3,2)))continue;chosen.push(p);}
+    this._cache=chosen;this._cacheAt=now;return chosen;
+  },
+  label(ctx,x,y,value,fg='#e8f5e9'){
+    const text=String(value),W=Viz.W;
+    ctx.font="600 10px 'Space Mono',monospace";
+    const tw=Math.ceil(ctx.measureText(text).width),pad=5,bw=tw+pad*2;
+    const bx=Math.max(2,Math.min(Math.max(2,W-bw-2),x-bw/2)),by=Math.max(0,y-12);
+    ctx.fillStyle='rgba(4,10,13,.94)';ctx.fillRect(bx,by,bw,16);
+    ctx.strokeStyle='rgba(160,196,188,.38)';ctx.lineWidth=.6;ctx.strokeRect(bx,by,bw,16);
+    ctx.fillStyle=fg;ctx.textAlign='left';ctx.textBaseline='middle';ctx.fillText(text,bx+pad,by+8);
+  },
+  tickValues(lo,hi,px,logarithmic){
+    if(!(hi>lo)||!Number.isFinite(lo)||!Number.isFinite(hi))return [];
+    const nums=[];
+    const push=v=>{if(v>=lo-1e-9&&v<=hi+1e-9&&Number.isFinite(v))nums.push(v);};
+    if(logarithmic&&hi/Math.max(lo,0.0001)>=15){
+      const min=Math.floor(Math.log10(Math.max(1e-6,lo))),max=Math.ceil(Math.log10(hi));
+      for(let d=min;d<=max&&d<15;d++)for(const m of [1,2,5])push(m*Math.pow(10,d));
+    }else{
+      const target=(hi-lo)/Math.max(2,px/85),power=Math.pow(10,Math.floor(Math.log10(Math.max(target,1e-9))));
+      const step=[1,2,5,10].map(a=>a*power).find(v=>v>=target)||10*power;
+      let first=Math.ceil((lo-1e-10*step)/step)*step;
+      for(let v=first,k=0;v<=hi+step*1e-7&&k<500;v+=step,k++)push(v);
+    }
+    return nums;
+  },
+  axes(ctx,mode){
+    const W=Viz.W,H=Viz.H,view=this.displayRange();
+    ctx.fillStyle='rgba(3,9,13,.87)';ctx.fillRect(0,0,W,23);ctx.fillRect(0,H-29,W,29);
+    ctx.font="600 10px 'Space Mono',monospace";ctx.fillStyle='#dafff0';ctx.textAlign='left';ctx.textBaseline='middle';
+    const desc=mode==='fall'?'WATERFALL · latest bottom':mode==='s3d'?'3D · foreground ruler':mode==='constel'?'LOG Hz →':mode==='twin'?'MIRRORED Hz ↔':'FREQUENCY · Hz →';
+    ctx.fillText(desc,9,11);
+    const topNote='Δf≈'+this.hz(this.binHz())+' Hz';
+    ctx.textAlign='right';ctx.fillStyle='#a0c5ba';ctx.fillText(topNote,W-8,11);
+    const log=mode==='constel'||mode==='spiral',available=mode==='twin'?W/2:W;
+    const ticks=this.tickValues(view.lo,view.hi,available,log||mode==='fall'&&Viz.fallCfg.log);
+    let last=-1e8;
+    const drawAt=x=>{
+      ctx.strokeStyle='rgba(131,206,196,.16)';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(x,23);ctx.lineTo(x,H-29);ctx.stroke();
+      ctx.strokeStyle='rgba(208,241,226,.85)';ctx.beginPath();ctx.moveTo(x,H-29);ctx.lineTo(x,H-20);ctx.stroke();
+    };
+    for(const f of ticks){
+      const u=this.position(f,mode);if(!Number.isFinite(u))continue;
+      if(mode==='twin'){
+        const x=W/2+u*W/2;drawAt(x);drawAt(W-x);
+        if(x-last<55)continue;last=x;
+        this.label(ctx,x,H-6,this.hz(f));
+      }else{
+        const x=u*W;drawAt(x);
+        if(x-last<56)continue;last=x;
+        this.label(ctx,x,H-6,this.hz(f));
+      }
+    }
+    // Physical frequency labels at both ends even for narrow, non-rounded windows.
+    if(ticks.length===0){
+      this.label(ctx,Math.min(40,W*.12),H-6,this.hz(view.lo));
+      this.label(ctx,W-35,H-6,this.hz(view.hi));
+    }
+    // Relative spectral magnitude: NOT decibels SPL and NOT calibrated microphone sensitivity.
+    if(mode==='spec'||mode==='bars'){
+      const scale=mode==='bars'?.92:1;
+      ctx.font="500 9px 'Space Mono',monospace";ctx.textAlign='right';
+      for(const v of [.25,.5,.75]){
+        const y=H-v*H*scale;
+        ctx.strokeStyle='rgba(255,255,255,.10)';ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();
+        ctx.fillStyle='rgba(200,240,224,.78)';ctx.fillText(Math.round(v*100)+'%',W-4,y-5);
+      }
+    }
+    const mark=(f,color,dash)=>{
+      const u=this.position(f,mode);if(!Number.isFinite(u))return null;
+      const x=mode==='twin'?W/2+u*W/2:u*W;
+      ctx.strokeStyle=color;ctx.lineWidth=1.5;ctx.setLineDash(dash);ctx.beginPath();ctx.moveTo(x,23);ctx.lineTo(x,H-29);ctx.stroke();ctx.setLineDash([]);
+      if(mode==='twin'){ctx.beginPath();ctx.moveTo(W-x,23);ctx.lineTo(W-x,H-29);ctx.stroke();}
+      return x;
+    };
+    if(State.src==='tone'&&Number.isFinite(State.freq)){const x=mark(State.freq,'rgba(58,255,160,.83)',[3,5]);if(x!==null)this.label(ctx,x,43,'SET '+this.hz(State.freq)+' Hz','#7dffd0');}
+    const peaks=this.peaks();let shown=0,lastPeak=-1e8;
+    for(const p of peaks){
+      const x=mark(p.f,'rgba(255,198,85,.87)',[7,4]);
+      if(x===null||Math.abs(x-lastPeak)<80)continue;
+      this.label(ctx,x,62+(shown%2)*18,'PEAK ~'+this.hz(p.f)+' Hz','#ffdc86');
+      lastPeak=x;shown++;if(shown>=2)break;
+    }
+    const cursorHz=this.frequency(this.cursor,mode);
+    mark(cursorHz,'rgba(127,210,255,.8)',[2,7]);
+  },
+  radial(ctx){
+    const W=Viz.W,H=Viz.H,cx=W/2,cy=H/2,small=Math.min(W,H),R=small*.445;
+    ctx.lineWidth=1;ctx.strokeStyle='rgba(191,228,210,.40)';ctx.beginPath();ctx.arc(cx,cy,R,0,Math.PI*2);ctx.stroke();
+    const N=W<420?6:8;
+    for(let i=0;i<N;i++){
+      const u=i/N,ang=2*Math.PI*u,f=this.frequency(u,'radial'),xx=Math.cos(ang),yy=Math.sin(ang);
+      ctx.strokeStyle='rgba(221,255,241,.72)';ctx.beginPath();ctx.moveTo(cx+xx*(R-9),cy+yy*(R-9));ctx.lineTo(cx+xx*(R+2),cy+yy*(R+2));ctx.stroke();
+      if(i===0)continue; // seam contains both min and max; show endpoints in heading instead
+      this.label(ctx,cx+xx*(R-19),cy+yy*(R-19),this.hz(f));
+    }
+    const {lo,hi}=this.displayRange();
+    ctx.fillStyle='rgba(4,10,13,.9)';ctx.fillRect(0,0,W,30);
+    ctx.font="600 10px 'Space Mono',monospace";ctx.fillStyle='#d5ffee';ctx.textAlign='left';ctx.textBaseline='middle';
+    ctx.fillText('RADIAL Hz · clockwise from right',8,10);
+    ctx.fillText(this.hz(lo)+' Hz → '+this.hz(hi)+' Hz (seam at 3 o’clock)',8,23);
+  },
+  spiral(ctx){
+    const W=Viz.W,H=Viz.H,cx=W/2,cy=H/2,R=Math.min(W,H)*.41,{lo,hi}=this.displayRange();
+    if(!(hi>lo))return;
+    for(let i=1;i<=4;i++){
+      const u=i/4,r=R*u,f=lo*Math.pow(hi/lo,u);
+      ctx.strokeStyle='rgba(210,239,226,.33)';ctx.lineWidth=1;ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.stroke();
+      this.label(ctx,cx+r*.70,cy+r*.70,this.hz(f));
+    }
+    ctx.fillStyle='rgba(4,10,13,.9)';ctx.fillRect(0,0,W,29);
+    ctx.font="600 10px 'Space Mono',monospace";ctx.fillStyle='#d5ffee';ctx.textAlign='left';ctx.textBaseline='middle';
+    ctx.fillText('PITCH SPIRAL · radius = log Hz',8,10);
+    ctx.fillText(this.hz(lo)+' → '+this.hz(hi)+' Hz · angle = octave position',8,22);
+  },
+  timeAxis(ctx,kind){
+    const W=Viz.W,H=Viz.H,sr=Audio.ctx?Audio.ctx.sampleRate:44100;
+    const fft=kind==='voices'?1024:(Audio.analyser?Audio.analyser.fftSize:2048);
+    let duration=(fft-1)/sr*1000;
+    if(kind==='blend'){
+      const M=typeof Mixer!=='undefined'?Mixer:null,tones=M&&M.layers?M.layers.filter(l=>l.type==='tone'):[],low=tones.length?Math.min(...tones.map(t=>t.freq)):440;
+      duration=Math.min(.05,3/Math.max(1,low))*1000;
+    }
+    ctx.fillStyle='rgba(4,10,13,.9)';ctx.fillRect(0,0,W,23);ctx.fillRect(0,H-27,W,27);
+    ctx.fillStyle='#d5ffee';ctx.font="600 10px 'Space Mono',monospace";ctx.textAlign='left';ctx.textBaseline='middle';
+    ctx.fillText('TIME-DOMAIN · horizontal = milliseconds',8,12);
+    for(let i=0;i<=4;i++){
+      const x=W*i/4,ms=duration*i/4;
+      ctx.strokeStyle='rgba(180,226,207,.25)';ctx.beginPath();ctx.moveTo(x,23);ctx.lineTo(x,H-27);ctx.stroke();
+      this.label(ctx,x,H-6,(ms>=10?ms.toFixed(1):ms.toFixed(2))+' ms');
+    }
+  },
+  colorAxes(ctx){
+    const W=Viz.W,H=Viz.H;
+    const drawTicks=(frequencies,fn,y,title)=>{
+      ctx.fillStyle='rgba(4,10,13,.92)';ctx.fillRect(0,y-13,W,23);
+      ctx.fillStyle='#dbffed';ctx.font="600 10px 'Space Mono',monospace";ctx.textAlign='left';ctx.textBaseline='middle';
+      ctx.fillText(title,8,y-5);
+      let last=-1e5;
+      frequencies.forEach(f=>{
+        const x=fn(f)*W;
+        if(!Number.isFinite(x))return;
+        ctx.strokeStyle='rgba(226,255,243,.82)';ctx.beginPath();ctx.moveTo(x,y+8);ctx.lineTo(x,y+15);ctx.stroke();
+        if(x-last<48)return;
+        last=x;this.label(ctx,x,y+27,this.hz(f)+' Hz');
+      });
+    };
+    drawTicks([370,400,450,500,550,600,650,700],f=>(f-363)/(717-363),H*.66,'TOP · 363–717 Hz → visible-color mapping');
+    drawTicks([20,50,100,200,500,1000,2000,5000,10000,20000],f=>Math.log(f/20)/Math.log(1000),H*.77,'BOTTOM · 20–20kHz → log frequency mapping');
+  },
+  conceptual(ctx,mode){
+    const W=Viz.W,H=Viz.H,
+      descriptions={phasor:'ILLUSTRATIVE PHASE · angle is not Hz',liss:'AMPLITUDE X vs DELAYED AMPLITUDE Y · not Hz',
+        chladni:'MODEL ONLY · nodal pattern has no measured Hz position',
+        cymatic:'MODEL ONLY · ripple radius is not measured distance/frequency',
+        mirror:'MIRRORED WAVEFORM · spatial position is not Hz',
+        scope:'WAVEFORM WRAPPED TO RING · angle is sample index, not Hz'};
+    const desc=descriptions[mode]||'NO SPATIAL Hz AXIS';
+    ctx.fillStyle='rgba(3,9,13,.9)';ctx.fillRect(0,0,W,37);
+    ctx.font="600 10px 'Space Mono',monospace";ctx.textBaseline='middle';ctx.fillStyle='#d5ffee';ctx.textAlign='left';
+    ctx.fillText(desc,8,12);
+    const known=State.src==='tone'?'SET '+this.fullHz(State.freq):'SOURCE '+State.src;
+    ctx.fillStyle='#a9c9bd';ctx.fillText(known,8,27);
+    if(mode==='liss'){
+      ctx.strokeStyle='rgba(191,226,208,.3)';ctx.beginPath();ctx.moveTo(W/2,37);ctx.lineTo(W/2,H);ctx.moveTo(0,H/2);ctx.lineTo(W,H/2);ctx.stroke();
+      ctx.font="500 9px 'Space Mono',monospace";ctx.fillStyle='#bbded0';ctx.fillText('Y=0',W/2+4,H/2-8);
+      ctx.textAlign='right';ctx.fillText('X=+1',W-6,H/2+11);
+    }
+  },
+  draw(customCtx){
+    if(!this.enabled||!Viz.W||!Viz.H)return;
+    const ctx=customCtx||Viz.ctx,mode=this.type();
+    ctx.save();ctx.globalAlpha=1;ctx.lineWidth=1;ctx.setLineDash([]);ctx.shadowBlur=0;
+    try{
+      if(['spec','fall','s3d','bars','twin','constel'].includes(mode))this.axes(ctx,mode);
+      else if(mode==='radial')this.radial(ctx);
+      else if(mode==='spiral')this.spiral(ctx);
+      else if(mode==='color')this.colorAxes(ctx);
+      else if(['wave','verify','voices','blend'].includes(mode))this.timeAxis(ctx,mode);
+      else this.conceptual(ctx,mode);
+    }finally{ctx.restore();}
+  }
+};
 const Viz={
   cv:$('cv'), ctx:$('cv').getContext('2d'), DPR:Math.min(window.devicePixelRatio||1,2), W:0,H:0, fall:null, raf:null, VIS:1, lowPerf:false, lastT:0, fpsAcc:60,
   fzLo:0, fzHi:1, FZVIZ:{spec:1,fall:1,bars:1,s3d:1,radial:1,twin:1,constel:1,spiral:1},
@@ -1752,7 +2099,13 @@ const Viz={
   fallCfg:{pal:'classic',floor:0,gain:1,log:false,spd:1},
   PAL:{inferno:[[0,0,4],[40,11,84],[120,28,109],[190,55,84],[236,121,35],[252,255,164]],viridis:[[68,1,84],[59,82,139],[33,145,140],[94,201,98],[253,231,37]],ice:[[3,5,26],[16,52,120],[40,130,200],[150,210,245],[255,255,255]]},
   fallColor(v,pal){if(pal==='classic')return `hsl(${200-v*200},90%,${10+v*55}%)`;if(pal==='gray'){const g=Math.round(v*255);return `rgb(${g},${g},${g})`;}const S=this.PAL[pal];if(!S)return `hsl(${200-v*200},90%,${10+v*55}%)`;const n=S.length-1,t=Math.max(0,Math.min(1,v))*n,i=Math.min(n-1,Math.floor(t)),f=t-i,a=S[i],b=S[i+1];return `rgb(${Math.round(a[0]+(b[0]-a[0])*f)},${Math.round(a[1]+(b[1]-a[1])*f)},${Math.round(a[2]+(b[2]-a[2])*f)})`;},
-  saveFall(){try{if(!this.fall)return false;const a=document.createElement('a');a.download='waterfall-'+Date.now()+'.png';a.href=this.fall.toDataURL('image/png');a.click();return true;}catch(e){return false;}},
+  saveFall(){try{if(!this.fall)return false;
+    const out=document.createElement('canvas');out.width=this.fall.width;out.height=this.fall.height;
+    const gc=out.getContext('2d');gc.drawImage(this.fall,0,0);gc.setTransform(this.DPR,0,0,this.DPR,0,0);
+    // The exported PNG includes exactly the labeled ruler shown on the live waterfall.
+    References.draw(gc);
+    const a=document.createElement('a');a.download='waterfall-'+Date.now()+'.png';a.href=out.toDataURL('image/png');a.click();return true;
+  }catch(e){return false;}},
   vFall(){const sx=this.ctx;if(!this.fall){this.fall=document.createElement('canvas');this.fall.width=this.W;this.fall.height=this.H;}const fc=this.fall.getContext('2d');
     const c=this.fallCfg;this._fallAcc=(this._fallAcc||0)+(c.spd||1);let step=Math.floor(this._fallAcc);this._fallAcc-=step;
     if(step<1){sx.drawImage(this.fall,0,0);return;}if(step>6)step=6;
@@ -1988,7 +2341,7 @@ function fallSyncUI(){const c=Viz.fallCfg;if($('fallPal'))$('fallPal').value=c.p
   if(fl)fl.addEventListener('input',()=>{c.floor=(+fl.value)/100;if($('fallFloorV'))$('fallFloorV').textContent=fl.value+'%';});
   if(gn)gn.addEventListener('input',()=>{c.gain=(+gn.value)/10;if($('fallGainV'))$('fallGainV').textContent=c.gain.toFixed(1)+'×';});
   if(sp)sp.addEventListener('input',()=>{c.spd=(+sp.value)/10;if($('fallSpdV'))$('fallSpdV').textContent=c.spd.toFixed(1)+'×';});
-  if(lg)lg.addEventListener('change',()=>{c.log=lg.checked;});
+  if(lg)lg.addEventListener('change',()=>{c.log=lg.checked;References.syncPanel();});
   if(sv)sv.addEventListener('click',()=>{if(!Viz.saveFall())Viz.saveFall();});
   if(rs)rs.addEventListener('click',()=>{Object.assign(c,{pal:'classic',floor:0,gain:1,log:false,spd:1});fallSyncUI();});
 })();
@@ -3072,7 +3425,7 @@ safe('resize',()=>Viz.resize());Viz.vfadeStart=performance.now();
 safe('freqV',()=>UI.freqV());safe('syncPlay',()=>UI.syncPlay());safe('hardware',()=>Hardware.render());safe('watchdog',()=>Watchdog.apply());
 safe('sweep',()=>Sweep.init());safe('calibration',()=>Calibration.load());
 safe('preset',()=>{const q=new URLSearchParams(location.search);if([...q.keys()].length)Presets.fromURL();else Presets.restoreLast();Presets.renderList();setSpeed(0);});
-safe('syncUI',()=>syncUI());safe('settings',()=>Settings.init());safe('display',()=>Display.init());safe('dock',()=>Dock.init());safe('fz',()=>Viz.fzInit());safe('selftest',()=>{$('sysRun').onclick=()=>SelfTest.run();$('sysExport').onclick=()=>SelfTest.export();$('sysCopy').onclick=()=>SelfTest.copy();$('sysShare').onclick=()=>SelfTest.share();const rp=$('sysReport');if(rp)rp.onclick=()=>SelfTest.selectReport();const sf=$('sysFab');if(sf)sf.onclick=()=>{sf.classList.remove('attn');$('sysPanel').classList.remove('hidden');sf.style.display='none';};$('sysClose').onclick=()=>{$('sysPanel').classList.add('hidden');if(sf)sf.style.display='flex';};});safe('mixer',()=>Mixer.init());
+safe('syncUI',()=>syncUI());safe('settings',()=>Settings.init());safe('display',()=>Display.init());safe('dock',()=>Dock.init());safe('fz',()=>Viz.fzInit());safe('references',()=>References.init());safe('selftest',()=>{$('sysRun').onclick=()=>SelfTest.run();$('sysExport').onclick=()=>SelfTest.export();$('sysCopy').onclick=()=>SelfTest.copy();$('sysShare').onclick=()=>SelfTest.share();const rp=$('sysReport');if(rp)rp.onclick=()=>SelfTest.selectReport();const sf=$('sysFab');if(sf)sf.onclick=()=>{sf.classList.remove('attn');$('sysPanel').classList.remove('hidden');sf.style.display='none';};$('sysClose').onclick=()=>{$('sysPanel').classList.add('hidden');if(sf)sf.style.display='flex';};});safe('mixer',()=>Mixer.init());
 let _rz;addEventListener('resize',()=>{clearTimeout(_rz);_rz=setTimeout(()=>{try{Viz.resize();}catch(e){}},120);});
 {let _ro=false;const _doR=()=>{_ro=false;try{Viz.resize();}catch(e){}};if(window.ResizeObserver&&Viz.cv&&Viz.cv.parentElement){try{new ResizeObserver(()=>{if(_ro)return;_ro=true;requestAnimationFrame(_doR);}).observe(Viz.cv.parentElement);}catch(e){}}}
 safe('loop',()=>Viz.loop());
